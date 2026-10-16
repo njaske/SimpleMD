@@ -30,6 +30,17 @@ jobs:
       - run: npm test
       - run: npm run build
 
+      # Create the draft up front: otherwise the installer and portable uploads
+      # race and electron-builder splits the assets across two drafts.
+      - name: Create draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 \
+            || gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft \
+                 --title "${GITHUB_REF_NAME#v}" --notes "SimpleMD ${GITHUB_REF_NAME}"
+
       - name: Package and upload to draft release
         run: npx --no-install electron-builder --win --publish always
         env:
@@ -43,4 +54,4 @@ jobs:
         run: |
           cd dist
           sha256sum SimpleMD-Setup.exe SimpleMD-portable.exe | tee SHA256SUMS.txt
-          gh release upload "${GITHUB_REF_NAME}" SHA256SUMS.txt --clobber
+          gh release upload "${GITHUB_REF_NAME}" SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --clobber
