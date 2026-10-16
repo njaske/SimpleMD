@@ -1,0 +1,46 @@
+name: Release
+
+# Build the Windows installer + portable exe when a version tag is pushed.
+#   git tag v1.0.1 && git push origin v1.0.1
+# electron-builder creates a DRAFT release; review it, then publish it manually.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write # create the release and upload assets
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: Package and upload to draft release
+        run: npx --no-install electron-builder --win --publish always
+        env:
+          # Built-in token; no code-signing certificate is used.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish SHA-256 checksums
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd dist
+          sha256sum SimpleMD-Setup.exe SimpleMD-portable.exe | tee SHA256SUMS.txt
+          gh release upload "${GITHUB_REF_NAME}" SHA256SUMS.txt --clobber

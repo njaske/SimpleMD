@@ -1,0 +1,116 @@
+/* App chrome — interaction/hover/active states for the window frame, activity bar,
+   sidebar, tabs, toolbar, and outline. Base layout lives inline in components;
+   these classes own the hover/active behavior the design expressed via style-hover. */
+
+/* Frameless window drag regions */
+.smd-titlebar { -webkit-app-region: drag; }
+.smd-titlebar button { -webkit-app-region: no-drag; }
+
+/* Window controls (minimize / maximize / close) */
+.smd-winbtn { width: 46px; height: 100%; border: none; background: transparent; color: var(--fg-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background .12s, color .12s; }
+.smd-winbtn:hover { background: var(--bg-hover); color: var(--fg); }
+.smd-closebtn:hover { background: #e81123; color: #fff; }
+
+/* Activity bar icon buttons */
+.smd-actbtn { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border: none; background: transparent; cursor: pointer; border-radius: 8px; position: relative; transition: color .12s, background .12s; }
+.smd-actbtn:hover { background: var(--bg-hover); }
+.smd-hovfg:hover { color: var(--fg); }
+.smd-actind { position: absolute; left: -8px; top: 9px; width: 3px; height: 22px; background: var(--accent); border-radius: 2px; }
+
+/* Ghost (bordered) buttons — Open, PDF, preferences */
+.smd-ghostbtn { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border-strong); background: var(--bg); color: var(--fg-muted); cursor: pointer; border-radius: 7px; padding: 5px 11px; font-size: 12px; font-weight: 500; transition: all .12s; }
+.smd-ghostbtn:hover { color: var(--fg); border-color: var(--fg-faint); }
+.smd-ghostbtn--sm { padding: 4px 9px; border-radius: 6px; font-size: 11.5px; gap: 5px; }
+
+/* Right-click context menu */
+.smd-menu { min-width: 190px; max-width: 280px; background: var(--bg); border: 1px solid var(--border-strong); border-radius: 9px; box-shadow: 0 12px 34px rgba(0, 0, 0, .22); padding: 5px; }
+.smd-menuitem { display: block; width: 100%; text-align: left; border: none; background: transparent; color: var(--fg); cursor: pointer; border-radius: 6px; padding: 7px 10px; font-size: 12.5px; transition: background .1s; }
+.smd-menuitem:hover:not(:disabled), .smd-menuitem:focus-visible { background: var(--bg-hover); }
+.smd-menuitem:disabled { color: var(--fg-faint); cursor: default; }
+.smd-menuitem--danger { color: #d64545; }
+.smd-menuitem--danger:hover:not(:disabled), .smd-menuitem--danger:focus-visible { background: color-mix(in oklch, #d64545 14%, transparent); }
+.smd-dark .smd-menuitem--danger { color: #f07171; }
+.smd-menusep { height: 1px; background: var(--border); margin: 5px 6px; }
+
+/* Primary (accent) button — dialogs */
+.smd-primarybtn { border: none; cursor: pointer; border-radius: 7px; padding: 6px 14px; font-size: 12.5px; font-weight: 600; background: var(--accent); color: #fff; transition: filter .12s; }
+.smd-primarybtn:hover { filter: brightness(1.08); }
+.smd-primarybtn:active { filter: brightness(0.95); }
+.smd-dangerbtn { background: #d64545; }
+
+/* Pressed states */
+.smd-ghostbtn:active, .smd-bigbtn:active { background: var(--bg-hover); transform: translateY(0.5px); }
+.smd-sqbtn:active { background: var(--bg-elev2); }
+.smd-winbtn:active { background: var(--bg-hover); }
+.smd-seg:not(.is-active):active { background: var(--bg-hover); }
+
+/* Square icon button (outline toggle, preferences) */
+.smd-sqbtn { display: flex; align-items: center; justify-content: center; width: 32px; height: 30px; border: 1px solid var(--border-strong); background: var(--bg); color: var(--fg-muted); cursor: pointer; border-radius: 7px; transition: all .12s; }
+.smd-sqbtn:hover { color: var(--fg); border-color: var(--fg-faint); }
+.smd-sqbtn.is-active { background: var(--bg-elev2); color: var(--fg); }
+
+/* Segmented control — Read / Split / Edit */
+.smd-seg-group { display: flex; background: var(--bg-elev2); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+.smd-seg { border: none; cursor: pointer; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 500; background: transparent; color: var(--fg-muted); transition: all .12s; }
+.smd-seg.is-active { background: var(--bg); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, .06); }
+.smd-seg:not(.is-active):hover { color: var(--fg); }
+
+/* Large button — empty state */
+.smd-bigbtn { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-strong); background: var(--bg); color: var(--fg); cursor: pointer; border-radius: 9px; padding: 9px 16px; font-size: 13px; font-weight: 500; transition: all .12s; }
+.smd-bigbtn:hover { border-color: var(--fg-faint); background: var(--bg-elev); }
+
+/* Sidebar — folder header rows */
+.smd-folder { display: flex; align-items: center; gap: 5px; padding: 5px 10px 5px 8px; cursor: pointer; color: var(--fg-muted); border-radius: 6px; margin: 0 6px; transition: background .12s; }
+.smd-folder:hover { background: var(--bg-hover); }
+.smd-fact { opacity: 0; transition: opacity .12s, color .12s; border: none; background: transparent; color: var(--fg-muted); cursor: pointer; border-radius: 5px; padding: 2px; display: flex; align-items: center; flex: none; }
+.smd-folder:hover .smd-fact { opacity: 1; }
+.smd-fact:hover { color: var(--accent); }
+
+/* Sidebar — file rows */
+.smd-row { display: flex; align-items: center; gap: 8px; padding: 5px 10px 5px 28px; margin: 0 6px; cursor: pointer; border-radius: 6px; transition: background .12s; }
+.smd-row:hover { background: var(--bg-hover); }
+.smd-row.is-active, .smd-row.is-active:hover { background: var(--accent-soft); }
+.smd-rowact { opacity: 0; transition: opacity .12s, color .12s; border: none; background: transparent; color: var(--fg-faint); cursor: pointer; padding: 1px; display: flex; border-radius: 4px; flex: none; }
+.smd-row:hover .smd-rowact { opacity: 1; }
+.smd-rowact:hover { color: var(--fg); }
+
+/* Generic hover-background rows (folder picker, search results, recents) */
+.smd-hovbg { transition: background .12s; }
+.smd-hovbg:hover { background: var(--bg-hover); }
+
+/* Pinned rows */
+.smd-pinrow { display: flex; align-items: center; gap: 9px; padding: 7px 10px; margin: 1px 0; cursor: pointer; border-radius: 7px; transition: background .12s; }
+.smd-pinrow:hover { background: var(--bg-hover); }
+.smd-unpin { opacity: 0; transition: opacity .12s, color .12s; border: none; background: transparent; color: var(--fg-faint); cursor: pointer; padding: 2px; display: flex; border-radius: 4px; flex: none; }
+.smd-pinrow:hover .smd-unpin { opacity: 1; }
+.smd-unpin:hover { color: var(--fg); }
+
+/* Tabs */
+.smd-tab { display: flex; align-items: center; gap: 8px; padding: 0 12px 0 14px; min-width: 0; max-width: 200px; cursor: pointer; border-right: 1px solid var(--border); position: relative; flex: none; background: transparent; transition: background .12s; }
+.smd-tab:hover { background: var(--bg-hover); }
+.smd-tab.is-active, .smd-tab.is-active:hover { background: var(--bg); }
+.smd-x { opacity: 0; transition: opacity .12s, background .12s; border: none; background: transparent; color: var(--fg-muted); cursor: pointer; display: flex; align-items: center; padding: 2px; border-radius: 4px; flex: none; }
+.smd-tab:hover .smd-x { opacity: .55; }
+.smd-tab:hover .smd-x:hover { opacity: 1; background: var(--bg-hover); }
+.smd-dirty { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-muted); flex: none; }
+
+/* Outline items */
+.smd-olitem { width: 100%; text-align: left; border: none; background: transparent; cursor: pointer; border-radius: 6px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: background .12s, color .12s; }
+.smd-olitem:hover { background: var(--bg-hover); color: var(--fg); }
+
+/* Search input box */
+.smd-search-box { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--border-strong); border-radius: 8px; padding: 0 10px; height: 34px; transition: border-color .12s; }
+.smd-search-box:focus-within { border-color: var(--fg-faint); }
+.smd-search-box input { flex: 1; border: none; background: transparent; outline: none; color: var(--fg); font-size: 13px; height: 100%; }
+.smd-search-box input::placeholder { color: var(--fg-faint); }
+
+/* Preferences popover */
+.smd-pref-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 4px; }
+.smd-pref-label { font-size: 12.5px; color: var(--fg-muted); }
+.smd-swatch { width: 18px; height: 18px; border-radius: 5px; cursor: pointer; border: 2px solid transparent; transition: transform .12s; }
+.smd-swatch:hover { transform: scale(1.12); }
+.smd-swatch.is-active { border-color: var(--fg); }
+.smd-chip { border: 1px solid var(--border-strong); background: var(--bg); color: var(--fg-muted); cursor: pointer; border-radius: 6px; padding: 4px 10px; font-size: 12px; transition: all .12s; }
+.smd-chip:hover { color: var(--fg); }
+.smd-chip.is-active { background: var(--accent-soft); color: var(--fg); border-color: transparent; }
+.smd-range { accent-color: var(--accent); width: 120px; }

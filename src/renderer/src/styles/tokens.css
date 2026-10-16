@@ -1,0 +1,70 @@
+/* Design tokens, base reset, scrollbars, animations, print — ported verbatim from
+   the SimpleMD design system. The accent is overridden at runtime from settings. */
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; background: #1a1a1a; }
+body { overflow: hidden; }
+#root { height: 100%; }
+button { font-family: inherit; font-size: inherit; }
+input, textarea { font-family: inherit; }
+
+.smd-root {
+  --bg: #ffffff; --bg-elev: #fafafa; --bg-elev2: #f3f3f3; --bg-hover: #eeeeee;
+  --fg: #1a1a1a; --fg-muted: #6b6b6b; --fg-faint: #767676;
+  --border: #e7e7e7; --border-strong: #dadada;
+  --accent: oklch(0.55 0.19 27);
+  --accent-soft: color-mix(in oklch, var(--accent) 13%, transparent);
+  --sel: color-mix(in oklch, var(--accent) 18%, transparent);
+  --code-bg: #f6f6f6; --code-border: #ececec;
+  --mono: 'SF Mono', 'JetBrains Mono', 'Menlo', 'Consolas', 'Liberation Mono', monospace;
+  --read-width: 740px; --read-font: inherit;
+  --tok-kw: #1a1a1a; --tok-str: #4f5d56; --tok-com: #767676; --tok-num: #3a3a3a; --tok-fn: #1a1a1a; --tok-punc: #6f6f6f;
+}
+.smd-dark {
+  --bg: #1a1a1a; --bg-elev: #161616; --bg-elev2: #212121; --bg-hover: #272727;
+  --fg: #e6e6e6; --fg-muted: #a0a0a0; --fg-faint: #8c8c8c;
+  --border: #2a2a2a; --border-strong: #383838;
+  --accent: oklch(0.66 0.16 27);
+  --code-bg: #202020; --code-border: #2d2d2d;
+  --tok-kw: #e6e6e6; --tok-str: #a8b8b0; --tok-com: #8a8a8a; --tok-num: #d0d0d0; --tok-fn: #e6e6e6; --tok-punc: #9a9a9a;
+}
+
+::selection { background: var(--sel); }
+
+.smd-root ::-webkit-scrollbar { width: 11px; height: 11px; }
+.smd-root ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; border: 3px solid transparent; background-clip: padding-box; }
+.smd-root ::-webkit-scrollbar-thumb:hover { background: var(--fg-faint); background-clip: padding-box; border: 3px solid transparent; }
+.smd-root ::-webkit-scrollbar-track, .smd-root ::-webkit-scrollbar-corner { background: transparent; }
+
+@keyframes smdFade { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+.smd-fade { animation: smdFade .24s cubic-bezier(.2, .7, .3, 1); }
+@keyframes smdPop { from { opacity: 0; transform: translateY(-4px) scale(.99); } to { opacity: 1; transform: none; } }
+.smd-pop { animation: smdPop .14s ease; }
+
+@media print {
+  html, body { background: #fff !important; }
+  .smd-titlebar, .smd-activity, .smd-sidebar, .smd-tabs, .smd-toolbar, .smd-outline, .smd-status, .smd-editor, .smd-copy { display: none !important; }
+  .smd-root { position: static !important; height: auto !important; }
+  .smd-body, .smd-center { display: block !important; overflow: visible !important; min-height: 0 !important; }
+  .smd-reader { position: static !important; overflow: visible !important; height: auto !important; }
+  .smd-article { max-width: 100% !important; padding: 0 !important; color: #000 !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .smd-fade, .smd-pop { animation: none !important; }
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Visible keyboard focus for every interactive element (focus-visible only, so
+   mouse users don't see rings). */
+.smd-root :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+.smd-root .cm-editor.cm-focused { outline: none; }

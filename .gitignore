@@ -1,0 +1,15 @@
+node_modules/
+out/
+dist/
+*.log
+.DS_Store
+.vite/
+.electron-vite/
+.env
+.env.*
+*.pem
+*.pfx
+*.p12
+.claude/
+.agents/
+coverage/
