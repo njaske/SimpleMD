@@ -93,7 +93,7 @@
       --code-bg: #F6F6F6;
       --scrollbar-thumb: rgba(0, 0, 0, 0.15);
       --scrollbar-track: rgba(0, 0, 0, 0.03);
-      --hero-glow: radial-gradient(circle at 50% 18%, rgba(217, 61, 66, 0.022) 0%, transparent 58%);
+      --hero-glow: radial-gradient(ellipse 62% 48% at 50% 10%, rgba(242, 92, 76, 0.13) 0%, rgba(255, 166, 136, 0.09) 40%, transparent 74%);
       --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 10px 24px -8px rgba(0, 0, 0, 0.06);
       --window-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 20px 48px -12px rgba(0, 0, 0, 0.12), 0 8px 16px -6px rgba(0, 0, 0, 0.05);
 
@@ -2755,7 +2755,12 @@
     }
 
     [data-theme="light"] .cta-backlight {
-      background: radial-gradient(ellipse at center, rgba(217, 61, 66, 0.05) 0%, transparent 70%);
+      background: radial-gradient(ellipse at center, rgba(242, 92, 76, 0.14) 0%, rgba(255, 166, 136, 0.09) 42%, transparent 72%);
+    }
+
+    [data-theme="light"] .tour-glow {
+      background: radial-gradient(closest-side, rgba(242, 92, 76, 0.16), rgba(255, 166, 136, 0.12) 45%, transparent 75%);
+      filter: blur(32px);
     }
 
     .final-cta-content {
@@ -3567,7 +3572,7 @@ graph LR
             </div>
             <div class="tour-toolbar">
               <p class="tour-caption" id="tour-caption" aria-live="polite">An AI answer, rendered the way it was meant to look: typeset equations, highlighted code and a live outline.</p>
-              <span class="tour-hint">Hover to pause, or pick a step.</span>
+              <span class="tour-hint">Pick a step, or let it play.</span>
               <button type="button" class="tour-toggle" id="tour-toggle" aria-pressed="false">
                 <svg class="icon-pause" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
                 <svg class="icon-play" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12-7.5a1 1 0 0 0 0-1.72l-12-7.5A1 1 0 0 0 7 4.5z"/></svg>
@@ -4066,7 +4071,7 @@ graph LR
         const EASE = 'cubic-bezier(0.16, 1, 0.3, 1)';
         let index = 0;
         let inView = false;
-        let hovering = false;
+        let keyboardFocus = false;
         let userPaused = false;
 
         const theme = () => (document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
@@ -4080,7 +4085,7 @@ graph LR
         }
 
         function syncPaused() {
-          const paused = reduceMotion || userPaused || hovering || !inView || document.hidden;
+          const paused = reduceMotion || userPaused || keyboardFocus || !inView || document.hidden;
           tour.classList.toggle('is-paused', paused);
         }
 
@@ -4154,10 +4159,9 @@ graph LR
           });
         });
 
-        tour.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') { hovering = true; syncPaused(); } });
-        tour.addEventListener('pointerleave', () => { hovering = false; syncPaused(); });
-        tour.addEventListener('focusin', () => { hovering = true; syncPaused(); });
-        tour.addEventListener('focusout', (e) => { if (!tour.contains(e.relatedTarget)) { hovering = false; syncPaused(); } });
+        // Keyboard users moving through the steps get time to read; mouse clicks just restart the timer.
+        tour.addEventListener('focusin', (e) => { keyboardFocus = e.target.matches(':focus-visible'); syncPaused(); });
+        tour.addEventListener('focusout', (e) => { if (!tour.contains(e.relatedTarget)) { keyboardFocus = false; syncPaused(); } });
         document.addEventListener('visibilitychange', syncPaused);
 
         toggle.addEventListener('click', () => {
