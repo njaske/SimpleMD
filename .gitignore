@@ -13,3 +13,7 @@ dist/
 .claude/
 .agents/
 coverage/
+*.key
+*.jks
+credentials.json
+*.map
