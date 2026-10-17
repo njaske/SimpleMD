@@ -15,7 +15,22 @@ export function slugify(text: string): string {
     .replace(/\s+/g, '-')
 }
 
+// The App asks for the outline and stats of the active document on every render
+// (and the outline again when painting), so remember the last answer.
+let lastOutlineSrc: string | null = null
+let lastOutline: OutlineEntry[] = []
+
+/** Headings of a document. The returned array is shared between calls for the
+ *  same text, so callers must treat it as read-only. */
 export function computeOutline(md: string): OutlineEntry[] {
+  if (md === lastOutlineSrc) return lastOutline
+  const result = scanOutline(md)
+  lastOutlineSrc = md
+  lastOutline = result
+  return result
+}
+
+function scanOutline(md: string): OutlineEntry[] {
   const lines = (md || '').split('\n')
   let inFence = false
   const out: OutlineEntry[] = []
@@ -47,7 +62,18 @@ export interface DocStats {
   headings: number
 }
 
+let lastStatsSrc: string | null = null
+let lastStats: DocStats | null = null
+
 export function computeStats(md: string): DocStats {
+  if (lastStats && md === lastStatsSrc) return lastStats
+  const stats = scanStats(md)
+  lastStatsSrc = md
+  lastStats = stats
+  return stats
+}
+
+function scanStats(md: string): DocStats {
   const text = (md || '').replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]*`/g, ' ')
   const words = (text.match(/[A-Za-z0-9’'À-ɏ]+/g) || []).length
   return {
@@ -102,6 +128,9 @@ export function searchAll(query: string, files: SearchableFile[]): SearchResult 
   if (!q) return { groups, total, fileCount }
 
   for (const file of files) {
+    // Cheap whole-file rejection before the per-line scan: most files in a big
+    // workspace don't contain the query at all.
+    if (file.content.toLowerCase().indexOf(ql) < 0) continue
     const lines = file.content.split('\n')
     const matches: SearchMatch[] = []
     let lineMatches = 0
@@ -132,4 +161,16 @@ export function searchAll(query: string, files: SearchableFile[]): SearchResult 
     }
   }
   return { groups, total, fileCount }
+}
+
+/** Cheap pre-parse checks for the optional libraries a document needs, so KaTeX
+ *  and highlight.js are only loaded for documents that can use them. */
+export function mayContainMath(md: string): boolean {
+  return md.includes('$')
+}
+
+export function mayContainCode(md: string): boolean {
+  // Deliberately loose (fences may sit in blockquotes / list items, or be raw
+  // HTML): a false positive only loads highlight.js early, a miss loses colours.
+  return /(?:```|~~~)[ \t]*[^\s`~]|language-/.test(md)
 }

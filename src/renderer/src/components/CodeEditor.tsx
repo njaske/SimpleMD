@@ -93,13 +93,20 @@ export default function CodeEditor({ value, onChange, isDark, jump }: Props) {
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
   const darkComp = useRef(new Compartment())
+  // Last text the editor itself reported, so the sync effect below can skip a
+  // full-document comparison for the echo of the user's own keystroke.
+  const lastEmitted = useRef(value)
 
   // Create the editor once per mount. The parent keys this component by file id,
   // so switching files remounts with a clean state/history and the right content.
   useEffect(() => {
     if (!host.current) return
     const listener = EditorView.updateListener.of((u) => {
-      if (u.docChanged) onChangeRef.current(u.state.doc.toString())
+      if (u.docChanged) {
+        const text = u.state.doc.toString()
+        lastEmitted.current = text
+        onChangeRef.current(text)
+      }
     })
     const view = new EditorView({
       parent: host.current,
@@ -130,9 +137,10 @@ export default function CodeEditor({ value, onChange, isDark, jump }: Props) {
   // without disturbing the cursor while the user is typing.
   useEffect(() => {
     const view = viewRef.current
-    if (!view) return
+    if (!view || value === lastEmitted.current) return
     const current = view.state.doc.toString()
     if (value !== current) {
+      lastEmitted.current = value
       view.dispatch({ changes: { from: 0, to: current.length, insert: value } })
     }
   }, [value])

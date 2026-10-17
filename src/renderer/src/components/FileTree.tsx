@@ -1,4 +1,4 @@
-import type { MouseEvent as ReactMouseEvent } from 'react'
+import { memo, type MouseEvent as ReactMouseEvent } from 'react'
 import type { FolderItem } from '@/state/viewmodel'
 import {
   BookmarkFill,
@@ -24,7 +24,62 @@ interface Props {
   onFolderContext: (id: string, e: ReactMouseEvent) => void
 }
 
-export default function FileTree({
+interface RowProps {
+  id: string
+  name: string
+  active: boolean
+  pinned: boolean
+  onOpenFile: (id: string) => void
+  onPinFile: (id: string) => void
+  onFileContext: (id: string, e: ReactMouseEvent) => void
+}
+
+// One row per file, memoized on primitives so switching the active document
+// re-renders only the two rows whose state changed, not thousands.
+const FileRow = memo(function FileRow({ id, name, active, pinned, onOpenFile, onPinFile, onFileContext }: RowProps) {
+  return (
+    <div
+      className={'smd-row' + (active ? ' is-active' : '')}
+      role="button"
+      tabIndex={0}
+      aria-label={`Open ${name}`}
+      aria-current={active ? 'true' : undefined}
+      onClick={() => onOpenFile(id)}
+      onKeyDown={activateOnKey(() => onOpenFile(id))}
+      onContextMenu={(e) => onFileContext(id, e)}
+      title={id}
+    >
+      <FileIcon size={14} sw={1.5} style={{ flex: 'none', color: active ? 'var(--accent)' : 'var(--fg-faint)' }} />
+      <span
+        style={{
+          flex: 1,
+          fontSize: 12.5,
+          color: active ? 'var(--fg)' : 'var(--fg-muted)',
+          fontWeight: active ? 600 : 400,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap'
+        }}
+      >
+        {name}
+      </span>
+      {pinned && <BookmarkFill size={12} style={{ flex: 'none', color: 'var(--accent)' }} />}
+      <button
+        className="smd-rowact"
+        aria-label={pinned ? `Unpin ${name}` : `Pin ${name}`}
+        title={pinned ? 'Unpin' : 'Pin'}
+        onClick={(e) => {
+          e.stopPropagation()
+          onPinFile(id)
+        }}
+      >
+        <BookmarkIcon size={13} />
+      </button>
+    </div>
+  )
+})
+
+function FileTree({
   folders,
   hasFolder,
   onToggleFolder,
@@ -121,54 +176,21 @@ export default function FileTree({
           </div>
           {folder.expanded &&
             folder.files.map((file) => (
-              <div
+              <FileRow
                 key={file.id}
-                className={'smd-row' + (file.active ? ' is-active' : '')}
-                role="button"
-                tabIndex={0}
-                aria-label={`Open ${file.name}`}
-                aria-current={file.active ? 'true' : undefined}
-                onClick={() => onOpenFile(file.id)}
-                onKeyDown={activateOnKey(() => onOpenFile(file.id))}
-                onContextMenu={(e) => onFileContext(file.id, e)}
-                title={file.id}
-              >
-                <FileIcon
-                  size={14}
-                  sw={1.5}
-                  style={{ flex: 'none', color: file.active ? 'var(--accent)' : 'var(--fg-faint)' }}
-                />
-                <span
-                  style={{
-                    flex: 1,
-                    fontSize: 12.5,
-                    color: file.active ? 'var(--fg)' : 'var(--fg-muted)',
-                    fontWeight: file.active ? 600 : 400,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap'
-                  }}
-                >
-                  {file.name}
-                </span>
-                {file.pinned && (
-                  <BookmarkFill size={12} style={{ flex: 'none', color: 'var(--accent)' }} />
-                )}
-                <button
-                  className="smd-rowact"
-                  aria-label={file.pinned ? `Unpin ${file.name}` : `Pin ${file.name}`}
-                  title={file.pinned ? 'Unpin' : 'Pin'}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onPinFile(file.id)
-                  }}
-                >
-                  <BookmarkIcon size={13} />
-                </button>
-              </div>
+                id={file.id}
+                name={file.name}
+                active={file.active}
+                pinned={file.pinned}
+                onOpenFile={onOpenFile}
+                onPinFile={onPinFile}
+                onFileContext={onFileContext}
+              />
             ))}
         </div>
       ))}
     </div>
   )
 }
+
+export default memo(FileTree)

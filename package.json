@@ -1,6 +1,6 @@
 {
   "name": "simplemd",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A fast, private desktop Markdown reader for AI-generated docs, with KaTeX math and Mermaid diagrams.",
   "keywords": [
     "markdown",

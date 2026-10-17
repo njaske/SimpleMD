@@ -18,6 +18,72 @@ const MAX_FILES = 4000
 const MAX_DEPTH = 12
 const MAX_FILE_BYTES = 5 * 1024 * 1024
 const MAX_IMAGE_BYTES = 16 * 1024 * 1024
+/** Parallel file reads during a scan: enough to keep the disk busy without
+ *  queueing thousands of pending reads behind libuv's small thread pool. */
+const READ_CONCURRENCY = 32
+/** Upper bound (in characters) on file text kept for re-scans. */
+const MAX_CACHE_CHARS = 48 * 1024 * 1024
+
+// Default-locale collation, same ordering as String#localeCompare but without
+// re-resolving the locale on every comparison (noticeable when sorting thousands
+// of paths).
+const collator = new Intl.Collator()
+const byLocale = (a: string, b: string): number => collator.compare(a, b)
+
+/** Run `fn` over `items` with at most `limit` in flight; results keep input order. */
+export async function mapLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++
+      results[i] = await fn(items[i])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return results
+}
+
+// Text of recently read files keyed by path, validated against size + mtime/ctime
+// so an unchanged file is not read again. The folder watcher triggers a full
+// re-scan on every change, which would otherwise re-read every file in the tree.
+interface CachedRead {
+  size: number
+  mtimeMs: number
+  ctimeMs: number
+  text: string
+}
+const readCache = new Map<string, CachedRead>()
+let readCacheChars = 0
+
+function cacheDrop(path: string): void {
+  const hit = readCache.get(path)
+  if (!hit) return
+  readCacheChars -= hit.text.length
+  readCache.delete(path)
+}
+
+function cachePut(path: string, entry: CachedRead): void {
+  cacheDrop(path)
+  if (entry.text.length > MAX_CACHE_CHARS) return
+  readCache.set(path, entry)
+  readCacheChars += entry.text.length
+  for (const oldest of readCache.keys()) {
+    if (readCacheChars <= MAX_CACHE_CHARS) break
+    cacheDrop(oldest)
+  }
+}
+
+/** True when a path (relative to the watched root) lies inside something the
+ *  scanner skips: dot-files/dirs (incl. our own save temp files) and SKIP_DIRS
+ *  such as node_modules or .git. Changes there can never alter a scan result. */
+export function isScanIgnored(relPath: string): boolean {
+  return relPath.split(/[\\/]/).some((seg) => seg.startsWith('.') || SKIP_DIRS.has(seg))
+}
 
 async function walk(dir: string, depth: number, out: string[]): Promise<void> {
   if (depth > MAX_DEPTH || out.length >= MAX_FILES) return
@@ -51,7 +117,7 @@ export async function scanFolder(root: string): Promise<FolderScan | null> {
 
   const files: string[] = []
   await walk(root, 0, files)
-  files.sort((a, b) => a.localeCompare(b))
+  files.sort(byLocale)
 
   const byDir = new Map<string, MdFileInfo[]>()
   for (const file of files) {
@@ -69,25 +135,26 @@ export async function scanFolder(root: string): Promise<FolderScan | null> {
       id: dir,
       name,
       path: dir,
-      files: list.sort((a, b) => a.name.localeCompare(b.name))
+      files: list.sort((a, b) => byLocale(a.name, b.name))
     })
   }
   tree.sort((a, b) => {
     if (a.path === root) return -1
     if (b.path === root) return 1
-    return a.name.localeCompare(b.name)
+    return byLocale(a.name, b.name)
   })
 
   const contents: Record<string, string> = {}
-  await Promise.all(
-    files.map(async (file) => {
-      try {
-        contents[file] = await readCapped(file)
-      } catch {
-        contents[file] = ''
-      }
-    })
-  )
+  const texts = await mapLimit(files, READ_CONCURRENCY, async (file) => {
+    try {
+      return await readCapped(file)
+    } catch {
+      return ''
+    }
+  })
+  files.forEach((file, i) => {
+    contents[file] = texts[i]
+  })
 
   return { root, name: basename(root) || root, tree, contents }
 }
@@ -102,9 +169,19 @@ export function isMarkdownFile(path: string): boolean {
 async function readCapped(path: string): Promise<string> {
   const stat = await fs.stat(path)
   if (stat.size > MAX_FILE_BYTES) {
+    cacheDrop(path)
     return `> _This file is too large to preview (${Math.round(stat.size / 1024)} KB)._`
   }
-  return fs.readFile(path, 'utf8')
+  const hit = readCache.get(path)
+  if (hit && hit.size === stat.size && hit.mtimeMs === stat.mtimeMs && hit.ctimeMs === stat.ctimeMs) {
+    // Refresh recency so frequently scanned files outlive idle ones.
+    readCache.delete(path)
+    readCache.set(path, hit)
+    return hit.text
+  }
+  const text = await fs.readFile(path, 'utf8')
+  cachePut(path, { size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, text })
+  return text
 }
 
 export async function readMdFile(path: string): Promise<string> {
@@ -113,17 +190,14 @@ export async function readMdFile(path: string): Promise<string> {
 
 /** Read several files, skipping any that can't be read. */
 export async function readMdFiles(paths: string[]): Promise<OpenedFile[]> {
-  const out: OpenedFile[] = []
-  await Promise.all(
-    paths.map(async (path) => {
-      try {
-        out.push({ path, content: await readCapped(path) })
-      } catch {
-        // skip unreadable file
-      }
-    })
-  )
-  return out
+  const read = await mapLimit(paths, READ_CONCURRENCY, async (path): Promise<OpenedFile | null> => {
+    try {
+      return { path, content: await readCapped(path) }
+    } catch {
+      return null // skip unreadable file
+    }
+  })
+  return read.filter((f): f is OpenedFile => f !== null)
 }
 
 /** Classify dropped paths: scan the first directory as a workspace, read loose .md files. */
@@ -159,6 +233,7 @@ export async function saveMdFile(path: string, content: string): Promise<void> {
   try {
     await fs.writeFile(tmp, content, { encoding: 'utf8', flag: 'wx' })
     await fs.rename(tmp, path)
+    cacheDrop(path)
   } catch (err) {
     try {
       await fs.unlink(tmp)

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, Menu, session, shell } from 'electron'
 import { join } from 'path'
 import { openFromSecondInstance, prepareLaunch, registerIpc, restoreAccess } from './ipc'
-import { saveSettings } from './settings'
+import { saveSettings, settingsWritten } from './settings'
 
 const RENDERER_DEV_URL = process.env['ELECTRON_RENDERER_URL']
 const isDev = !!RENDERER_DEV_URL
@@ -128,6 +128,16 @@ if (!gotLock) {
 
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()
+  })
+
+  // Let the last settings write (tabs, theme, ...) reach disk before exiting.
+  let settingsFlushed = false
+  app.on('before-quit', (event) => {
+    if (settingsFlushed) return
+    settingsFlushed = true
+    event.preventDefault()
+    // One macrotask first, so a save the closing window just sent is queued.
+    setTimeout(() => void settingsWritten().finally(() => app.quit()), 0)
   })
 
   if (isDev) {

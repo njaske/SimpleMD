@@ -37,6 +37,8 @@ nsis:
   allowToChangeInstallationDirectory: true
   deleteAppDataOnUninstall: false
   shortcutName: SimpleMD
+  # Explorer "Open with" name fixes (stale MuiCache, explicit app name).
+  include: build/installer.nsh
   artifactName: ${productName}-Setup.${ext}
 portable:
   artifactName: ${productName}-portable.${ext}

@@ -1,4 +1,4 @@
-import type { MouseEvent as ReactMouseEvent } from 'react'
+import { memo, type MouseEvent as ReactMouseEvent } from 'react'
 import type { Activity } from '@shared/types'
 import type { FolderItem, NamedFileRef } from '@/state/viewmodel'
 import type { SearchResult } from '@/lib/document'
@@ -35,7 +35,7 @@ const TITLES: Record<Activity, string> = {
   pinned: 'Pinned & Recent'
 }
 
-export default function Sidebar(props: Props) {
+function Sidebar(props: Props) {
   const { activity } = props
   return (
     <div
@@ -130,3 +130,6 @@ export default function Sidebar(props: Props) {
     </div>
   )
 }
+
+// Props are stable between keystrokes, so typing in the editor skips the sidebar.
+export default memo(Sidebar)

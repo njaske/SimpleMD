@@ -1,7 +1,9 @@
 import { marked, type Tokens, type TokenizerAndRendererExtension } from 'marked'
 import DOMPurify from 'dompurify'
-import katex from 'katex'
-import 'katex/dist/katex.min.css'
+import type katexType from 'katex'
+import { mayContainCode, mayContainMath } from '@/lib/document'
+import { TextCache } from '@/lib/lru'
+import { isHighlighterSettled, loadHighlighter } from '@/lib/highlight'
 
 marked.use({ gfm: true, breaks: false })
 
@@ -14,8 +16,45 @@ marked.use({ gfm: true, breaks: false })
 //  - inline   $...$     where the opening $ isn't followed by whitespace, the
 //    closing $ isn't preceded by whitespace, and isn't followed by a digit —
 //    so "$5 for $10" is left alone but "$x=1$;" closes at the right $.
+//
+// KaTeX (JS + stylesheet + fonts) is loaded on demand: callers await
+// prepareMarkdown() before parsing a document that may contain math.
+let katex: typeof katexType | null = null
+let katexLoading: Promise<void> | null = null
+let katexSettled = false
+
+function loadKatex(): Promise<void> {
+  if (!katexLoading) {
+    // The stylesheet loads independently, so a CSS chunk failure can't disable math.
+    const css = import('katex/dist/katex.min.css').catch(() => undefined)
+    katexLoading = Promise.all([import('katex'), css])
+      .then(([m]) => {
+        katex = m.default
+      })
+      .catch(() => {
+        // chunk failed to load; math falls back to its escaped source text
+      })
+      .finally(() => {
+        katexSettled = true
+      })
+  }
+  return katexLoading
+}
+
+/** Load whatever optional renderers (KaTeX, highlight.js) this document needs.
+ *  Returns null when everything needed is already available, so the common path
+ *  stays synchronous. */
+export function prepareMarkdown(md: string): Promise<void> | null {
+  if (md.length > MAX_PARSE_CHARS) return null
+  const loads: Promise<void>[] = []
+  if (mayContainMath(md) && !katexSettled) loads.push(loadKatex())
+  if (mayContainCode(md) && !isHighlighterSettled()) loads.push(loadHighlighter())
+  return loads.length ? Promise.all(loads).then(() => undefined) : null
+}
+
 function renderMath(tex: string, displayMode: boolean): string {
   try {
+    if (!katex) throw new Error('KaTeX not loaded')
     return katex.renderToString(tex, { displayMode, throwOnError: false, output: 'htmlAndMathml' })
   } catch {
     const d = displayMode ? '$$' : '$'
@@ -92,9 +131,22 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
  *  so a hostile or accidental huge file cannot freeze the renderer. */
 const MAX_PARSE_CHARS = 1_000_000
 
+// Re-parsing is the dominant cost of switching back to a document, so keep the
+// sanitized HTML of a few recently viewed ones (bounded by size).
+const parseCache = new TextCache(6, 6_000_000)
+
 /** Parse Markdown to sanitized HTML. Sanitizing protects against malicious
  *  content in files the user opens from disk. */
 export function parseMarkdown(md: string): string {
+  const cached = parseCache.get(md)
+  if (cached !== undefined) return cached
+  const html = parseUncached(md)
+  // Don't memoize output produced before KaTeX arrived (math shown as source).
+  if (!mayContainMath(md) || katex) parseCache.set(md, html)
+  return html
+}
+
+function parseUncached(md: string): string {
   let html: string
   const source = md ?? ''
   if (source.length > MAX_PARSE_CHARS) {

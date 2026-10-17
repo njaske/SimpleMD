@@ -1,6 +1,5 @@
 import { Component, createRef, lazy, Suspense } from 'react'
 import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react'
-import hljs from 'highlight.js/lib/common'
 import type {
   Activity,
   DropResult,
@@ -13,7 +12,8 @@ import type {
   ThemeName,
   ViewMode
 } from '@shared/types'
-import { parseMarkdown } from '@/lib/markdown'
+import { parseMarkdown, prepareMarkdown } from '@/lib/markdown'
+import { highlightCode } from '@/lib/highlight'
 import { computeOutline, computeStats, searchAll } from '@/lib/document'
 import type { SearchableFile, SearchResult } from '@/lib/document'
 import type { FolderItem, NamedFileRef, OutlineItem, TabItem } from '@/state/viewmodel'
@@ -42,6 +42,15 @@ interface ConfirmState {
 
 const MAX_AUTO_OPEN = 40
 const MAX_RECENTS = 8
+/** Settings writes are coalesced for this long after the last change. */
+const PERSIST_DELAY_MS = 400
+/** In split view the preview trails typing by this long (longer for huge docs). */
+const LIVE_PREVIEW_DELAY_MS = 150
+const LIVE_PREVIEW_DELAY_LARGE_MS = 400
+const LARGE_DOC_CHARS = 200_000
+/** Warm the lazy editor chunk this long after startup, off the critical path. */
+const EDITOR_PREFETCH_DELAY_MS = 2000
+const NO_SEARCH: SearchResult = { groups: [], total: 0, fileCount: 0 }
 const READING_FONTS: Record<ReadingFont, string> = {
   Sans: "'Helvetica Neue',Helvetica,Arial,sans-serif",
   Serif: "'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif",
@@ -49,6 +58,14 @@ const READING_FONTS: Record<ReadingFont, string> = {
 }
 
 let mermaidSeq = 0
+
+/** Identity of what the reader last painted; a render is skipped while it matches. */
+interface RenderKey {
+  id: string | null
+  mode: ViewMode
+  theme: ThemeName
+  md: string
+}
 
 /** Last path segment of a file/dir path (handles both / and \\). */
 function baseName(p: string): string {
@@ -104,7 +121,14 @@ export default class App extends Component<Record<string, never>, AppState> {
   private rootRef = createRef<HTMLDivElement>()
   private readerRef = createRef<HTMLDivElement>()
   private index = new Map<string, FileMeta>()
-  private sig: string | null = null
+  private renderKey: RenderKey | null = null
+  // Bumped on every real repaint so async work (images, mermaid) can tell its DOM is stale.
+  private renderGen = 0
+  private preparing = false
+  private renderTimer: ReturnType<typeof setTimeout> | null = null
+  private memos = new Map<string, { deps: readonly unknown[]; value: unknown }>()
+  private scanning = false
+  private rescanQueued = false
   private lastFile: string | null = null
   private unsubMax: (() => void) | null = null
   private unsubFolderChanged: (() => void) | null = null
@@ -163,30 +187,62 @@ export default class App extends Component<Record<string, never>, AppState> {
     // Safety net so a cancelled/interrupted drag never leaves the overlay stuck.
     window.addEventListener('dragend', this.resetDrag)
     window.addEventListener('drop', this.resetDrag)
+    // React never unmounts when the window closes, so flush on pagehide too.
+    window.addEventListener('pagehide', this.flushPersist)
     this.bootstrap()
+  }
+
+  private flushPersist = (): void => {
+    if (!this.persistTimer) return
+    clearTimeout(this.persistTimer)
+    this.persistTimer = null
+    if (this.lastPersist) window.api.setSettings(JSON.parse(this.lastPersist))
   }
 
   componentWillUnmount(): void {
     window.removeEventListener('keydown', this.onKey)
     window.removeEventListener('dragend', this.resetDrag)
     window.removeEventListener('drop', this.resetDrag)
+    window.removeEventListener('pagehide', this.flushPersist)
     this.unsubMax?.()
     this.unsubFolderChanged?.()
     this.unsubRequestClose?.()
     this.unsubOpenPaths?.()
     if (this.noteTimer) clearTimeout(this.noteTimer)
+    if (this.renderTimer) clearTimeout(this.renderTimer)
     // Flush any pending settings write so nothing is lost on close.
-    if (this.persistTimer) {
-      clearTimeout(this.persistTimer)
-      if (this.lastPersist) window.api.setSettings(JSON.parse(this.lastPersist))
-    }
+    this.flushPersist()
   }
 
-  componentDidUpdate(): void {
-    this.applyProps()
+  componentDidUpdate(_props: unknown, prev: AppState): void {
+    const s = this.state
+    if (s.accent !== prev.accent || s.readingWidth !== prev.readingWidth || s.readingFont !== prev.readingFont) {
+      this.applyProps()
+    }
     this.renderDoc(false)
-    this.persist()
-    this.reportUnsaved()
+    if (
+      s.theme !== prev.theme || s.accent !== prev.accent || s.readingFont !== prev.readingFont ||
+      s.readingWidth !== prev.readingWidth || s.activity !== prev.activity ||
+      s.sidebarOpen !== prev.sidebarOpen || s.outlineOpen !== prev.outlineOpen ||
+      s.viewMode !== prev.viewMode || s.pinned !== prev.pinned || s.recents !== prev.recents ||
+      s.openTabs !== prev.openTabs || s.activeId !== prev.activeId ||
+      s.looseFiles !== prev.looseFiles || s.ready !== prev.ready
+    ) {
+      this.persist()
+    }
+    if (s.contents !== prev.contents || s.saved !== prev.saved) this.reportUnsaved()
+  }
+
+  /** Memoize a derived value on reference equality of its inputs, so typing in
+   *  the editor doesn't rebuild the file tree, outline or search results. */
+  private memo<T>(key: string, deps: readonly unknown[], compute: () => T): T {
+    const hit = this.memos.get(key)
+    if (hit && hit.deps.length === deps.length && hit.deps.every((d, i) => Object.is(d, deps[i]))) {
+      return hit.value as T
+    }
+    const value = compute()
+    this.memos.set(key, { deps, value })
+    return value
   }
 
   private async bootstrap(): Promise<void> {
@@ -210,26 +266,22 @@ export default class App extends Component<Record<string, never>, AppState> {
         this.renderDoc(true)
       }
     )
+    // The three disk reads below are independent, so start them together and
+    // apply the results in the original order.
+    const looseRead = this.readLooseFiles(s.looseFiles)
+    const folderScan = s.lastFolder
+      ? window.api.scanFolder(s.lastFolder).catch(() => null)
+      : Promise.resolve(null)
+    const launchFiles = window.api.takeLaunchFiles().catch(() => null)
+
     // Restore individually-opened files into the tree (without reopening tabs;
     // the persisted openTabs already reference them).
-    let loosePaths: string[] = []
-    if (s.looseFiles && s.looseFiles.length) {
-      const items = await Promise.all(
-        s.looseFiles.map(async (p) => {
-          try {
-            return { path: p, content: await window.api.readFile(p) }
-          } catch {
-            return null
-          }
-        })
-      )
-      const valid = items.filter((x): x is OpenedFile => x !== null)
-      loosePaths = valid.map((x) => x.path)
-      if (valid.length) this.addLooseFiles(valid, { open: false })
-    }
+    const valid = await looseRead
+    const loosePaths = valid.map((x) => x.path)
+    if (valid.length) this.addLooseFiles(valid, { open: false })
 
     if (s.lastFolder) {
-      const scan = await window.api.scanFolder(s.lastFolder)
+      const scan = await folderScan
       if (scan) {
         this.applyScan(scan, {
           restoreTabs: s.openTabs,
@@ -248,8 +300,30 @@ export default class App extends Component<Record<string, never>, AppState> {
 
     // Files opened from the shell (double-click, "Open with") that started this
     // launch go on top of the restored session.
-    const launched = await window.api.takeLaunchFiles()
+    const launched = await launchFiles
     if (launched) this.openResult(launched)
+
+    // Warm the editor chunk once the first document is up, so the first switch
+    // to Edit/Split doesn't wait on a ~1 MB parse.
+    // Compiling it blocks the thread briefly, so wait for an idle moment too.
+    setTimeout(
+      () => requestIdleCallback(() => void import('@/components/CodeEditor'), { timeout: 10_000 }),
+      EDITOR_PREFETCH_DELAY_MS
+    )
+  }
+
+  private async readLooseFiles(paths: string[] | undefined): Promise<OpenedFile[]> {
+    if (!paths || !paths.length) return []
+    const items = await Promise.all(
+      paths.map(async (p) => {
+        try {
+          return { path: p, content: await window.api.readFile(p) }
+        } catch {
+          return null
+        }
+      })
+    )
+    return items.filter((x): x is OpenedFile => x !== null)
   }
 
   private applyProps(): void {
@@ -282,7 +356,10 @@ export default class App extends Component<Record<string, never>, AppState> {
     if (key === this.lastPersist) return
     this.lastPersist = key
     if (this.persistTimer) clearTimeout(this.persistTimer)
-    this.persistTimer = setTimeout(() => window.api.setSettings(snapshot), 300)
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null
+      window.api.setSettings(snapshot)
+    }, PERSIST_DELAY_MS)
   }
 
   // ---- data helpers --------------------------------------------------------
@@ -773,10 +850,29 @@ export default class App extends Component<Record<string, never>, AppState> {
   // ---- external change reconciliation (file watching) ----------------------
 
   private reconcileFolder = async (): Promise<void> => {
+    // One re-scan at a time; changes that land mid-scan trigger a single follow-up.
+    if (this.scanning) {
+      this.rescanQueued = true
+      return
+    }
     const root = this.state.root
     if (!root) return
-    const scan = await window.api.scanFolder(root)
+    this.scanning = true
+    let scan: FolderScan | null = null
+    try {
+      scan = await window.api.scanFolder(root)
+    } finally {
+      this.scanning = false
+    }
+    if (this.rescanQueued) {
+      this.rescanQueued = false
+      void this.reconcileFolder()
+    }
     if (!scan) return
+    this.applyReconcile(scan)
+  }
+
+  private applyReconcile(scan: FolderScan): void {
     this.setState((s) => {
       const contents = { ...s.contents }
       const saved = { ...s.saved }
@@ -975,27 +1071,65 @@ export default class App extends Component<Record<string, never>, AppState> {
     if (!el) return
     const id = this.state.activeId
     const md = this.contentOf(id)
-    const sig = (id || '') + '|' + this.state.viewMode + '|' + this.state.theme + '|' + md
+    const mode = this.state.viewMode
+    const theme = this.state.theme
+    const last = this.renderKey
+    const sameView = !!last && last.id === id && last.mode === mode && last.theme === theme
     const needsFill = el.childElementCount === 0
-    if (!force && !needsFill && sig === this.sig) return
-    this.sig = sig
+    if (!force && !needsFill && sameView && last.md === md) return
+
+    // While typing in split view, let the preview trail the keystrokes instead
+    // of re-parsing the whole document on each one.
+    if (!force && !needsFill && sameView && mode === 'split') {
+      if (this.renderTimer) clearTimeout(this.renderTimer)
+      const delay = md.length > LARGE_DOC_CHARS ? LIVE_PREVIEW_DELAY_LARGE_MS : LIVE_PREVIEW_DELAY_MS
+      this.renderTimer = setTimeout(() => {
+        this.renderTimer = null
+        this.renderDoc(true)
+      }, delay)
+      return
+    }
+
+    // KaTeX / highlight.js load on demand; wait for them so the first paint of
+    // a document that needs them is already correct.
+    const pending = id ? prepareMarkdown(md) : null
+    if (pending) {
+      // One re-render once the chunks arrive, however many updates came meanwhile.
+      if (!this.preparing) {
+        this.preparing = true
+        void pending.then(() => {
+          this.preparing = false
+          this.renderDoc(true)
+        })
+      }
+      return
+    }
+
+    if (this.renderTimer) {
+      clearTimeout(this.renderTimer)
+      this.renderTimer = null
+    }
+    this.renderKey = { id, mode, theme, md }
+    const myGen = ++this.renderGen
     if (!id) {
       el.innerHTML = ''
       this.lastFile = null
       return
     }
-    const mySig = sig
     const changedFile = this.lastFile !== id
     const html = parseMarkdown(md)
     const outline = computeOutline(md)
-    el.innerHTML = '<div class="smd-article' + (changedFile ? ' smd-fade' : '') + '">' + html + '</div>'
-    const article = el.firstElementChild as HTMLElement | null
+    // Build the article inside an inert <template> so <img> tags in the document
+    // are never fetched (enhanceImages swaps them out); it's attached once ready.
+    const tpl = document.createElement('template')
+    tpl.innerHTML = '<div class="smd-article' + (changedFile ? ' smd-fade' : '') + '">' + html + '</div>'
+    const article = tpl.content.firstElementChild as HTMLElement | null
     if (!article) return
 
     article.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach((h, i) => {
       if (outline[i]) (h as HTMLElement).id = outline[i].slug
     })
-    this.enhanceImages(article, id, mySig)
+    this.enhanceImages(article, id, myGen)
 
     // Pull mermaid blocks out before highlighting so hljs/copy buttons skip them.
     const mermaidJobs: { container: HTMLElement; source: string }[] = []
@@ -1010,14 +1144,15 @@ export default class App extends Component<Record<string, never>, AppState> {
 
     article.querySelectorAll<HTMLElement>('pre code[class*="language-"]').forEach((code) => {
       try {
-        hljs.highlightElement(code)
+        highlightCode(code)
       } catch {
         // unknown language — leave as plain text
       }
     })
     article.querySelectorAll<HTMLElement>('pre').forEach((pre) => this.addCopyButton(pre))
 
-    if (mermaidJobs.length) this.renderMermaid(mermaidJobs, mySig)
+    el.replaceChildren(article)
+    if (mermaidJobs.length) this.renderMermaid(mermaidJobs, myGen)
 
     if (changedFile) {
       el.scrollTop = 0
@@ -1025,7 +1160,7 @@ export default class App extends Component<Record<string, never>, AppState> {
     }
   }
 
-  private enhanceImages(article: HTMLElement, docPath: string, mySig: string): void {
+  private enhanceImages(article: HTMLElement, docPath: string, myGen: number): void {
     article.querySelectorAll('img').forEach((img) => {
       const src = img.getAttribute('src') || ''
       const alt = img.getAttribute('alt') || ''
@@ -1057,7 +1192,7 @@ export default class App extends Component<Record<string, never>, AppState> {
         window.api
           .readImage(docPath, src)
           .then((dataUrl) => {
-            if (this.sig !== mySig || !figure.isConnected || !dataUrl) return
+            if (this.renderGen !== myGen || !figure.isConnected || !dataUrl) return
             const real = document.createElement('img')
             real.src = dataUrl
             real.alt = alt
@@ -1088,7 +1223,7 @@ export default class App extends Component<Record<string, never>, AppState> {
 
   private async renderMermaid(
     jobs: { container: HTMLElement; source: string }[],
-    mySig: string
+    myGen: number
   ): Promise<void> {
     let mermaid
     try {
@@ -1096,7 +1231,7 @@ export default class App extends Component<Record<string, never>, AppState> {
     } catch {
       return // mermaid chunk failed to load; leave placeholders empty
     }
-    if (this.sig !== mySig) return
+    if (this.renderGen !== myGen) return
     mermaid.initialize({
       startOnLoad: false,
       securityLevel: 'strict',
@@ -1104,11 +1239,11 @@ export default class App extends Component<Record<string, never>, AppState> {
       fontFamily: "'Helvetica Neue',Helvetica,Arial,sans-serif"
     })
     for (const job of jobs) {
-      if (this.sig !== mySig) return
+      if (this.renderGen !== myGen) return
       if (!job.container.isConnected) continue
       try {
         const { svg } = await mermaid.render('smd-mmd-' + ++mermaidSeq, job.source)
-        if (this.sig !== mySig || !job.container.isConnected) return
+        if (this.renderGen !== myGen || !job.container.isConnected) return
         job.container.innerHTML = svg
       } catch {
         // Invalid diagram — fall back to showing the source with a small note.
@@ -1136,79 +1271,93 @@ export default class App extends Component<Record<string, never>, AppState> {
     const activeMd = this.contentOf(activeId)
 
     // Build the file index from the workspace tree + individually-opened files.
-    const index = new Map<string, FileMeta>()
-    for (const folder of s.tree) {
-      for (const f of folder.files) index.set(f.path, { name: f.name, folderName: folder.name, dir: f.dir })
-    }
-    for (const lf of s.looseFiles) {
-      if (!index.has(lf.path)) index.set(lf.path, { name: lf.name, folderName: baseName(lf.dir), dir: lf.dir })
-    }
+    const index = this.memo('index', [s.tree, s.looseFiles], () => {
+      const map = new Map<string, FileMeta>()
+      for (const folder of s.tree) {
+        for (const f of folder.files) map.set(f.path, { name: f.name, folderName: folder.name, dir: f.dir })
+      }
+      for (const lf of s.looseFiles) {
+        if (!map.has(lf.path)) map.set(lf.path, { name: lf.name, folderName: baseName(lf.dir), dir: lf.dir })
+      }
+      return map
+    })
     this.index = index
 
     // Merge workspace folders with loose files, grouped by directory (VS Code-like).
-    const fileItem = (path: string, name: string): FolderItem['files'][number] => ({
-      id: path,
-      name,
-      active: path === activeId,
-      pinned: s.pinned.includes(path)
-    })
-    const folderById = new Map<string, FolderItem>()
-    const folderOrder: string[] = []
-    for (const folder of s.tree) {
-      folderById.set(folder.id, {
-        id: folder.id,
-        name: folder.name,
-        expanded: s.expanded[folder.id] ?? true,
-        files: folder.files.map((f) => fileItem(f.path, f.name))
+    const folders = this.memo('folders', [s.tree, s.looseFiles, s.expanded, s.pinned, activeId], () => {
+      const pinnedSet = new Set(s.pinned)
+      const fileItem = (path: string, name: string): FolderItem['files'][number] => ({
+        id: path,
+        name,
+        active: path === activeId,
+        pinned: pinnedSet.has(path)
       })
-      folderOrder.push(folder.id)
-    }
-    for (const lf of s.looseFiles) {
-      let group = folderById.get(lf.dir)
-      if (!group) {
-        group = { id: lf.dir, name: baseName(lf.dir), expanded: s.expanded[lf.dir] ?? true, files: [] }
-        folderById.set(lf.dir, group)
-        folderOrder.push(lf.dir)
+      const folderById = new Map<string, FolderItem>()
+      const folderOrder: string[] = []
+      for (const folder of s.tree) {
+        folderById.set(folder.id, {
+          id: folder.id,
+          name: folder.name,
+          expanded: s.expanded[folder.id] ?? true,
+          files: folder.files.map((f) => fileItem(f.path, f.name))
+        })
+        folderOrder.push(folder.id)
       }
-      if (!group.files.some((x) => x.id === lf.path)) group.files.push(fileItem(lf.path, lf.name))
-    }
-    const folders: FolderItem[] = folderOrder.map((id) => folderById.get(id)!)
+      const present = new Map<string, Set<string>>()
+      for (const [gid, group] of folderById) present.set(gid, new Set(group.files.map((f) => f.id)))
+      for (const lf of s.looseFiles) {
+        let group = folderById.get(lf.dir)
+        if (!group) {
+          group = { id: lf.dir, name: baseName(lf.dir), expanded: s.expanded[lf.dir] ?? true, files: [] }
+          folderById.set(lf.dir, group)
+          folderOrder.push(lf.dir)
+          present.set(lf.dir, new Set())
+        }
+        const ids = present.get(lf.dir)!
+        if (!ids.has(lf.path)) {
+          group.files.push(fileItem(lf.path, lf.name))
+          ids.add(lf.path)
+        }
+      }
+      return folderOrder.map((id) => folderById.get(id)!)
+    })
 
     const tabs: TabItem[] = s.openTabs.map((id) => {
       const meta = this.fileMeta(id)
       return { id, name: meta.name, active: id === activeId, pinned: s.pinned.includes(id), dirty: this.isDirty(id) }
     })
 
-    let searchResult: SearchResult = { groups: [], total: 0, fileCount: 0 }
-    if (s.activity === 'search') {
-      const files: SearchableFile[] = []
-      for (const folder of s.tree) {
-        for (const f of folder.files) {
-          files.push({ id: f.path, name: f.name, folderName: folder.name, content: s.contents[f.path] ?? '' })
-        }
-      }
-      for (const lf of s.looseFiles) {
-        if (!files.some((x) => x.id === lf.path)) {
-          files.push({ id: lf.path, name: lf.name, folderName: baseName(lf.dir), content: s.contents[lf.path] ?? '' })
-        }
-      }
-      searchResult = searchAll(s.searchQuery, files)
-    }
+    const searchResult: SearchResult =
+      s.activity === 'search'
+        ? this.memo('search', [s.searchQuery, s.tree, s.looseFiles, s.contents], () => {
+            const files: SearchableFile[] = []
+            const seen = new Set<string>()
+            for (const folder of s.tree) {
+              for (const f of folder.files) {
+                seen.add(f.path)
+                files.push({ id: f.path, name: f.name, folderName: folder.name, content: s.contents[f.path] ?? '' })
+              }
+            }
+            for (const lf of s.looseFiles) {
+              if (!seen.has(lf.path)) {
+                files.push({ id: lf.path, name: lf.name, folderName: baseName(lf.dir), content: s.contents[lf.path] ?? '' })
+              }
+            }
+            return searchAll(s.searchQuery, files)
+          })
+        : NO_SEARCH
 
-    const outline: OutlineItem[] = computeOutline(activeMd).map((o, i) => ({
-      key: i,
-      slug: o.slug,
-      text: o.text,
-      level: o.level
-    }))
+    const outline = this.memo<OutlineItem[]>('outline', [activeMd], () =>
+      computeOutline(activeMd).map((o, i) => ({ key: i, slug: o.slug, text: o.text, level: o.level }))
+    )
     const st = activeId ? computeStats(activeMd) : { words: 0, minutes: 0, lines: 0, headings: 0 }
 
-    const pinned = s.pinned.map((id) => this.fileMeta(id))
-    const recent = s.recents.map((id) => this.fileMeta(id))
+    const pinned = this.memo('pinnedRefs', [s.pinned, index], () => s.pinned.map((id) => this.fileMeta(id)))
+    const recent = this.memo('recentRefs', [s.recents, index], () => s.recents.map((id) => this.fileMeta(id)))
 
     const breadcrumb = af ? (af.folder ? af.folder + '  /  ' + af.name : af.name) : ''
     const dirty = activeId ? this.isDirty(activeId) : false
-    const unsavedList = this.unsavedFiles()
+    const unsavedList = s.closePrompt ? this.unsavedFiles() : []
     const modeLabel = s.viewMode === 'read' ? 'Reading' : s.viewMode === 'split' ? 'Split' : 'Editing'
     const showEditor = s.viewMode === 'edit' || s.viewMode === 'split'
     const showReader = s.viewMode === 'read' || s.viewMode === 'split'

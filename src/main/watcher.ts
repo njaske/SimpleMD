@@ -1,5 +1,6 @@
 import { watch, type FSWatcher } from 'fs'
 import type { WebContents } from 'electron'
+import { isScanIgnored } from './fs-md'
 
 // A single active folder watcher. Uses the built-in fs.watch (no native deps) so
 // the packaged app needs no extra node_modules. Events are debounced and the
@@ -28,7 +29,10 @@ export function stopWatching(): void {
 export function watchFolder(root: string, sender: WebContents): void {
   stopWatching()
 
-  const notify = (): void => {
+  const notify = (_event?: string, filename?: string | Buffer | null): void => {
+    // Churn inside node_modules/.git/dot-dirs (and our own save temp files) can't
+    // change the scan, so don't wake the renderer for it.
+    if (typeof filename === 'string' && filename && isScanIgnored(filename)) return
     if (debounce) clearTimeout(debounce)
     debounce = setTimeout(() => {
       if (!sender.isDestroyed()) sender.send('folder:changed')
