@@ -21,7 +21,7 @@ And your files never leave your machine.
 
 <br>
 
-<img src="site/screenshots/ai-answer.png" alt="SimpleMD reading an AI-generated design doc with a typeset equation, highlighted TypeScript and a live outline" width="100%">
+<img src="site/screenshots/math-code-dark.png" alt="SimpleMD reading an AI-generated design doc with a typeset equation, highlighted TypeScript and a live outline" width="100%">
 
 </div>
 
@@ -40,21 +40,21 @@ SimpleMD renders all of it the way it was meant to look, in a fast desktop app t
 <table>
   <tr>
     <td width="50%" valign="top">
-      <img src="site/screenshots/diagrams-tables.png" alt="Table with inline math above a rendered Mermaid flowchart and a task list"><br>
+      <img src="site/screenshots/diagrams-dark.png" alt="Table with inline math above a rendered Mermaid flowchart and a task list"><br>
       <b>Diagrams and tables.</b> Mermaid flowcharts, sequence diagrams, tables with inline math and task lists, all rendered inline.
     </td>
     <td width="50%" valign="top">
-      <img src="site/screenshots/split-view.png" alt="Split view with the Markdown source on the left and the rendered preview on the right"><br>
+      <img src="site/screenshots/split-dark.png" alt="Split view with the Markdown source on the left and the rendered preview on the right"><br>
       <b>Split view.</b> Edit the source on the left, watch the preview follow as you type. Ctrl+S saves.
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <img src="site/screenshots/search.png" alt="Workspace search results listing every match by file and line"><br>
+      <img src="site/screenshots/search-dark.png" alt="Workspace search results listing every match by file and line"><br>
       <b>Search everything.</b> Find any word across every file in the folder you opened, with each match in context.
     </td>
     <td width="50%" valign="top">
-      <img src="site/screenshots/light-theme.png" alt="Light theme showing Fourier series equations typeset with KaTeX"><br>
+      <img src="site/screenshots/reading-light.png" alt="Light theme with the reading preferences open over Fourier series equations"><br>
       <b>Light or dark.</b> One shortcut (Ctrl+Shift+D). Pick Sans, Serif or Mono, set the reading width and accent colour.
     </td>
   </tr>

@@ -73,33 +73,33 @@
     }
 
     [data-theme="light"] {
-      --bg-base: #FBFBFC;
+      --bg-base: #FAFAFA;
       --surface-1: #FFFFFF;
-      --surface-2: #F3F3F6;
-      --surface-3: #EAEAEF;
+      --surface-2: #F4F4F4;
+      --surface-3: #ECECEC;
       --border-hairline: rgba(0, 0, 0, 0.07);
       --border-hover: rgba(0, 0, 0, 0.14);
       --border-active: rgba(0, 0, 0, 0.22);
-      --text-primary: #121214;
-      --text-secondary: #565964;
-      --text-muted: #6B6F7B;
+      --text-primary: #1A1A1A;
+      --text-secondary: #555555;
+      --text-muted: #6B6B6B;
       --accent-red: #D93D42;
       --btn-primary-bg: #C93237; /* WCAG AA 5.26:1 with white */
       --btn-primary-hover: #B71C1C;
       --accent-red-glow: rgba(201, 50, 55, 0.14);
       --selection-bg: rgba(217, 61, 66, 0.18);
-      --selection-text: #121214;
-      --glass-nav: rgba(251, 251, 252, 0.86);
-      --code-bg: #F0F0F4;
+      --selection-text: #1A1A1A;
+      --glass-nav: rgba(250, 250, 250, 0.86);
+      --code-bg: #F6F6F6;
       --scrollbar-thumb: rgba(0, 0, 0, 0.15);
       --scrollbar-track: rgba(0, 0, 0, 0.03);
-      --hero-glow: radial-gradient(circle at 50% 20%, rgba(217, 61, 66, 0.04) 0%, transparent 60%);
+      --hero-glow: radial-gradient(circle at 50% 18%, rgba(217, 61, 66, 0.022) 0%, transparent 58%);
       --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 10px 24px -8px rgba(0, 0, 0, 0.06);
       --window-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 20px 48px -12px rgba(0, 0, 0, 0.12), 0 8px 16px -6px rgba(0, 0, 0, 0.05);
 
       /* High-Contrast Syntax Tokens - Light (All >= 4.5:1 WCAG AA) */
       --gutter-bg: rgba(0, 0, 0, 0.04);
-      --gutter-text: #565964;
+      --gutter-text: #6B6B6B;
     }
 
     /* Light Theme Badges Contrast Overrides */
@@ -1873,44 +1873,261 @@
        SECTION 5: FEATURE GRID WITH SPOTLIGHT CARDS (#features)
        6 Spotlight Cards with pointer tracking (--mx, --my), radial glow, 2px lift
        ========================================================================== */
-    /* Real app screenshots (#screenshots) */
-    .shots-section {
+    /* Guided tour of the real app (#screenshots) */
+    .tour-section {
       padding: 144px 0;
       border-top: 1px solid var(--border-hairline);
+      position: relative;
+      overflow: hidden;
     }
-    .shots-tabs {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 8px;
-      margin-bottom: 24px;
+    .tour {
+      --tour-ease: cubic-bezier(0.16, 1, 0.3, 1);
+      display: grid;
+      grid-template-columns: minmax(240px, 290px) minmax(0, 1fr);
+      gap: 56px;
+      align-items: center;
+      width: min(1280px, calc(100vw - 48px));
+      margin-left: calc(50% - min(640px, 50vw - 24px));
     }
-    .shots-tabs .preset-btn[aria-pressed="true"] {
-      background: var(--surface-3);
-      color: var(--text-primary);
-      border-color: var(--border-active);
-    }
-    .shots-frame {
+    .tour-steps {
+      list-style: none;
       margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
     }
-    .shots-frame img {
-      display: block;
+    .tour-step {
+      all: unset;
+      box-sizing: border-box;
+      display: grid;
+      grid-template-rows: auto 0fr auto;
       width: 100%;
-      height: auto;
-      aspect-ratio: 1440 / 900;
-      background: var(--surface-2);
-      transition: opacity 0.25s var(--ease-impeccable);
+      padding: 18px 4px 16px;
+      cursor: pointer;
+      border-radius: 10px;
+      transition: grid-template-rows 0.5s var(--tour-ease);
     }
-    .shots-frame img.is-swapping {
-      opacity: 0.35;
+    .tour-step:focus-visible {
+      outline: 2px solid var(--accent-red);
+      outline-offset: 2px;
     }
-    .shots-caption {
-      margin-top: 20px;
-      text-align: center;
+    .tour-step-title {
+      font-family: var(--font-serif);
+      font-size: 1.5rem;
+      line-height: 1.2;
+      letter-spacing: -0.015em;
+      color: var(--text-muted);
+      transition: color 0.3s ease;
+    }
+    .tour-step:hover .tour-step-title {
       color: var(--text-secondary);
+    }
+    .tour-step[aria-selected="true"] {
+      grid-template-rows: auto 1fr auto;
+    }
+    .tour-step[aria-selected="true"] .tour-step-title {
+      color: var(--text-primary);
+    }
+    .tour-step-body {
+      overflow: hidden;
+      min-height: 0;
+    }
+    .tour-step-body span {
+      display: block;
+      padding-top: 10px;
       font-size: 0.9375rem;
       line-height: 1.6;
-      min-height: 3.2em;
+      color: var(--text-secondary);
+      opacity: 0;
+      transform: translateY(-4px);
+      transition: opacity 0.3s ease, transform 0.5s var(--tour-ease);
+    }
+    .tour-step[aria-selected="true"] .tour-step-body span {
+      opacity: 1;
+      transform: none;
+      transition-delay: 0.08s;
+    }
+    .tour-step-track {
+      display: block;
+      height: 2px;
+      margin-top: 16px;
+      border-radius: 2px;
+      background: var(--border-hairline);
+      overflow: hidden;
+    }
+    .tour-step-fill {
+      display: block;
+      height: 100%;
+      width: 100%;
+      background: var(--accent-red);
+      transform: scaleX(0);
+      transform-origin: left center;
+    }
+    .tour-step[aria-selected="true"] .tour-step-fill {
+      animation: tourFill var(--tour-duration, 6.5s) linear forwards;
+    }
+    .tour.is-paused .tour-step[aria-selected="true"] .tour-step-fill {
+      animation-play-state: paused;
+    }
+    .tour.is-static .tour-step[aria-selected="true"] .tour-step-fill {
+      animation: none;
+      transform: scaleX(1);
+    }
+    @keyframes tourFill {
+      to { transform: scaleX(1); }
+    }
+
+    .tour-stage {
+      position: relative;
+      min-width: 0;
+    }
+    .tour-glow {
+      position: absolute;
+      inset: -12% -8%;
+      background: radial-gradient(closest-side, var(--accent-red-glow), transparent 72%);
+      filter: blur(24px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .tour-frame {
+      position: relative;
+      z-index: 1;
+      aspect-ratio: 1440 / 900;
+      border-radius: 14px;
+      overflow: hidden;
+      background: var(--surface-2);
+      box-shadow: var(--window-shadow);
+      isolation: isolate;
+    }
+    .tour-shot {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: top left;
+      opacity: 0;
+      visibility: hidden;
+    }
+    .tour-shot.is-active {
+      opacity: 1;
+      visibility: visible;
+      z-index: 2;
+    }
+    .tour-shot.is-leaving {
+      visibility: visible;
+      z-index: 1;
+    }
+    .tour-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: 20px;
+      position: relative;
+      z-index: 1;
+    }
+    .tour-caption {
+      display: none;
+      margin: 0;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+      color: var(--text-secondary);
+    }
+    .tour-hint {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+    }
+    .tour-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex: none;
+      background: var(--surface-1);
+      border: 1px solid var(--border-hairline);
+      color: var(--text-secondary);
+      font: 500 0.8125rem var(--font-sans);
+      padding: 8px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+    }
+    .tour-toggle:hover {
+      color: var(--text-primary);
+      border-color: var(--border-hover);
+      background: var(--surface-2);
+    }
+    .tour-toggle:focus-visible {
+      outline: 2px solid var(--accent-red);
+      outline-offset: 2px;
+    }
+    .tour-toggle .icon-play { display: none; }
+    .tour.is-user-paused .tour-toggle .icon-play { display: block; }
+    .tour.is-user-paused .tour-toggle .icon-pause { display: none; }
+    .tour.is-static .tour-toggle { display: none; }
+
+    @media (max-width: 960px) {
+      .tour {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 24px;
+      }
+      .tour-steps {
+        flex-direction: row;
+        gap: 8px;
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding: 0 0 4px;
+        scroll-snap-type: x proximity;
+      }
+      .tour-steps::-webkit-scrollbar { display: none; }
+      .tour-steps li { flex: none; scroll-snap-align: start; }
+      .tour-step {
+        display: inline-flex;
+        flex-direction: column;
+        width: auto;
+        padding: 10px 16px 0;
+        border: 1px solid var(--border-hairline);
+        border-radius: 10px;
+        background: var(--surface-1);
+        overflow: hidden;
+      }
+      .tour-step[aria-selected="true"] {
+        border-color: var(--border-active);
+        background: var(--surface-2);
+      }
+      .tour-step-title {
+        font-family: var(--font-sans);
+        font-size: 0.875rem;
+        font-weight: 500;
+        letter-spacing: 0;
+        white-space: nowrap;
+      }
+      .tour-step-body { display: none; }
+      .tour-step-track {
+        margin: 8px -16px 0;
+        height: 2px;
+        border-radius: 0;
+        background: transparent;
+      }
+      .tour-caption { display: block; }
+      .tour-hint { display: none; }
+      .tour {
+        width: auto;
+        margin-left: 0;
+      }
+      .tour-toolbar {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 14px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .tour-step,
+      .tour-step-body span {
+        transition: none;
+      }
     }
 
     /* VirusTotal verification (#install) */
@@ -3285,31 +3502,80 @@ graph LR
     <!-- ======================================================================
          REAL APP SCREENSHOTS (#screenshots)
          ====================================================================== -->
-    <section class="shots-section" id="screenshots">
+    <section class="tour-section" id="screenshots">
       <div class="container">
 
         <div class="section-header">
           <h2 class="section-title">The real app. <em>Not</em> a mockup.</h2>
           <p class="section-desc measure">
-            Every frame below is SimpleMD 1.0.3 running on Windows, opening the kind of Markdown an AI assistant hands you.
+            Every frame is SimpleMD 1.0.3 running on Windows, opening the kind of Markdown an AI assistant hands you. Flip the site theme and the app follows.
           </p>
         </div>
 
-        <div class="shots-tabs" role="group" aria-label="Choose a screenshot">
-          <button type="button" class="preset-btn" aria-pressed="true" data-shot="ai-answer">Math &amp; code</button>
-          <button type="button" class="preset-btn" aria-pressed="false" data-shot="diagrams-tables">Diagrams &amp; tables</button>
-          <button type="button" class="preset-btn" aria-pressed="false" data-shot="split-view">Split view</button>
-          <button type="button" class="preset-btn" aria-pressed="false" data-shot="search">Search</button>
-          <button type="button" class="preset-btn" aria-pressed="false" data-shot="light-theme">Light theme</button>
-        </div>
+        <div class="tour" id="tour">
+          <ol class="tour-steps" role="tablist" aria-label="Tour of SimpleMD" aria-orientation="vertical">
+            <li>
+              <button type="button" class="tour-step" role="tab" id="tour-tab-math-code" aria-controls="tour-stage" aria-selected="true" data-shot="math-code">
+                <span class="tour-step-title">Math &amp; code</span>
+                <span class="tour-step-body"><span>An AI answer, rendered the way it was meant to look: typeset equations, highlighted code and a live outline.</span></span>
+                <span class="tour-step-track" aria-hidden="true"><span class="tour-step-fill"></span></span>
+              </button>
+            </li>
+            <li>
+              <button type="button" class="tour-step" role="tab" id="tour-tab-diagrams" aria-controls="tour-stage" aria-selected="false" tabindex="-1" data-shot="diagrams">
+                <span class="tour-step-title">Diagrams &amp; tables</span>
+                <span class="tour-step-body"><span>Mermaid flowcharts, tables with inline math and task lists render in place. No plugins, no setup.</span></span>
+                <span class="tour-step-track" aria-hidden="true"><span class="tour-step-fill"></span></span>
+              </button>
+            </li>
+            <li>
+              <button type="button" class="tour-step" role="tab" id="tour-tab-split" aria-controls="tour-stage" aria-selected="false" tabindex="-1" data-shot="split">
+                <span class="tour-step-title">Split view</span>
+                <span class="tour-step-body"><span>Fix what the AI got wrong on the left and watch the preview follow as you type. Ctrl+S saves.</span></span>
+                <span class="tour-step-track" aria-hidden="true"><span class="tour-step-fill"></span></span>
+              </button>
+            </li>
+            <li>
+              <button type="button" class="tour-step" role="tab" id="tour-tab-search" aria-controls="tour-stage" aria-selected="false" tabindex="-1" data-shot="search">
+                <span class="tour-step-title">Search everything</span>
+                <span class="tour-step-body"><span>Every file in the folder you opened, searched as you type, with each match shown in context.</span></span>
+                <span class="tour-step-track" aria-hidden="true"><span class="tour-step-fill"></span></span>
+              </button>
+            </li>
+            <li>
+              <button type="button" class="tour-step" role="tab" id="tour-tab-reading" aria-controls="tour-stage" aria-selected="false" tabindex="-1" data-shot="reading">
+                <span class="tour-step-title">Made for reading</span>
+                <span class="tour-step-body"><span>Pick Sans, Serif or Mono, set the measure and the accent, and switch light or dark with Ctrl+Shift+D.</span></span>
+                <span class="tour-step-track" aria-hidden="true"><span class="tour-step-fill"></span></span>
+              </button>
+            </li>
+          </ol>
 
-        <figure class="shots-frame demo-window">
-          <img id="shots-image" src="screenshots/ai-answer.png" width="2880" height="1800" loading="lazy" decoding="async"
-               alt="SimpleMD reading an AI-generated rate limiter design: rendered equation, syntax-highlighted TypeScript, outline panel on the right.">
-        </figure>
-        <p class="shots-caption" id="shots-caption" aria-live="polite">
-          An AI answer, rendered the way it was meant to look: typeset equations, highlighted code and a live outline.
-        </p>
+          <div class="tour-stage" id="tour-stage" role="tabpanel" aria-labelledby="tour-tab-math-code">
+            <div class="tour-glow" aria-hidden="true"></div>
+            <div class="tour-frame">
+              <img class="tour-shot is-active" data-shot="math-code" src="screenshots/math-code-dark.png" width="2880" height="1800" decoding="async"
+                   alt="SimpleMD reading an AI-generated rate limiter design: a typeset equation, highlighted TypeScript and the outline panel.">
+              <img class="tour-shot" data-shot="diagrams" data-src="screenshots/diagrams-dark.png" width="2880" height="1800" decoding="async"
+                   alt="A comparison table with inline math above a rendered Mermaid flowchart and a task list.">
+              <img class="tour-shot" data-shot="split" data-src="screenshots/split-dark.png" width="2880" height="1800" decoding="async"
+                   alt="Split view: Markdown source in the editor on the left, the rendered preview on the right.">
+              <img class="tour-shot" data-shot="search" data-src="screenshots/search-dark.png" width="2880" height="1800" decoding="async"
+                   alt="Workspace search for the word token, listing every match by file and line.">
+              <img class="tour-shot" data-shot="reading" data-src="screenshots/reading-dark.png" width="2880" height="1800" decoding="async"
+                   alt="Reading preferences open over a page of Fourier series equations: accent colours, font choice and reading width.">
+            </div>
+            <div class="tour-toolbar">
+              <p class="tour-caption" id="tour-caption" aria-live="polite">An AI answer, rendered the way it was meant to look: typeset equations, highlighted code and a live outline.</p>
+              <span class="tour-hint">Hover to pause, or pick a step.</span>
+              <button type="button" class="tour-toggle" id="tour-toggle" aria-pressed="false">
+                <svg class="icon-pause" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+                <svg class="icon-play" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12-7.5a1 1 0 0 0 0-1.72l-12-7.5A1 1 0 0 0 7 4.5z"/></svg>
+                <span class="tour-toggle-label">Pause tour</span>
+              </button>
+            </div>
+          </div>
+        </div>
 
       </div>
     </section>
@@ -3784,35 +4050,142 @@ graph LR
       }
 
       /* ------------------------------------------------------------------------
-         Screenshot gallery tabs
+         Guided tour of the real app: auto-advances while on screen, pauses on
+         hover / focus / tab hidden, wipes between frames, follows the site theme
          ------------------------------------------------------------------------ */
-      const SHOTS = {
-        "ai-answer": ["SimpleMD reading an AI-generated rate limiter design: rendered equation, syntax-highlighted TypeScript, outline panel on the right.", "An AI answer, rendered the way it was meant to look: typeset equations, highlighted code and a live outline."],
-        "diagrams-tables": ["A comparison table with inline math above a Mermaid flowchart and a task list, all rendered in SimpleMD.", "Tables, task lists and Mermaid flowcharts render inline. No plugins, no extra setup."],
-        "split-view": ["Split view: Markdown source in the editor on the left, live rendered preview on the right.", "Split view: edit the source on the left, watch the preview follow as you type."],
-        "search": ["Workspace search for the word token, with every match listed by file and line.", "Search every file in the folder you opened, with each match shown in context."],
-        "light-theme": ["SimpleMD in light theme showing Fourier series equations typeset with KaTeX.", "Light or dark, one shortcut away (Ctrl+Shift+D). Long equations stay crisp in both."]
-      };
-      const shotImg = document.getElementById("shots-image");
-      const shotCaption = document.getElementById("shots-caption");
-      const shotButtons = document.querySelectorAll("[data-shot]");
-      shotButtons.forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          const key = btn.getAttribute("data-shot");
-          const info = SHOTS[key];
-          if (!info || !shotImg) return;
-          shotButtons.forEach(function (b) { b.setAttribute("aria-pressed", String(b === btn)); });
-          shotImg.classList.add("is-swapping");
-          const next = new Image();
-          next.onload = next.onerror = function () {
-            shotImg.src = next.src;
-            shotImg.alt = info[0];
-            shotImg.classList.remove("is-swapping");
-          };
-          next.src = "screenshots/" + key + ".png";
-          shotCaption.textContent = info[1];
+      (function initTour() {
+        const tour = document.getElementById('tour');
+        if (!tour) return;
+        const steps = Array.from(tour.querySelectorAll('.tour-step'));
+        const shots = Array.from(tour.querySelectorAll('.tour-shot'));
+        const stage = document.getElementById('tour-stage');
+        const caption = document.getElementById('tour-caption');
+        const toggle = document.getElementById('tour-toggle');
+        const toggleLabel = toggle.querySelector('.tour-toggle-label');
+        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const EASE = 'cubic-bezier(0.16, 1, 0.3, 1)';
+        let index = 0;
+        let inView = false;
+        let hovering = false;
+        let userPaused = false;
+
+        const theme = () => (document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
+        const srcFor = (img) => 'screenshots/' + img.dataset.shot + '-' + theme() + '.png';
+
+        // Load a frame's image for the current theme (lazily, the first time it is needed).
+        function ensureLoaded(img) {
+          const want = srcFor(img);
+          if (img.getAttribute('src') !== want) img.setAttribute('src', want);
+          return img.decode ? img.decode().catch(() => {}) : Promise.resolve();
+        }
+
+        function syncPaused() {
+          const paused = reduceMotion || userPaused || hovering || !inView || document.hidden;
+          tour.classList.toggle('is-paused', paused);
+        }
+
+        function go(next, opts) {
+          next = (next + steps.length) % steps.length;
+          if (next === index) return;
+          const forward = opts && opts.backward ? false : next > index || (index === steps.length - 1 && next === 0);
+          const from = shots[index];
+          const to = shots[next];
+
+          steps.forEach((s, i) => {
+            const on = i === next;
+            s.setAttribute('aria-selected', String(on));
+            s.tabIndex = on ? 0 : -1;
+          });
+          stage.setAttribute('aria-labelledby', steps[next].id);
+          caption.textContent = steps[next].querySelector('.tour-step-body span').textContent;
+          if (opts && opts.scrollChip) steps[next].scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' });
+          index = next;
+
+          ensureLoaded(to).then(() => {
+            if (shots[index] !== to) return; // a newer step won the race
+            shots.forEach((s) => s.classList.remove('is-leaving'));
+            from.classList.remove('is-active');
+            from.classList.add('is-leaving');
+            to.classList.add('is-active');
+            if (reduceMotion || !to.animate) {
+              to.animate && to.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: 'ease-out' });
+              setTimeout(() => from.classList.remove('is-leaving'), 240);
+              return;
+            }
+            const clipStart = forward ? 'inset(0 0 0 100%)' : 'inset(0 100% 0 0)';
+            to.animate(
+              [
+                { clipPath: clipStart, transform: 'scale(1.035)', filter: 'brightness(1.08)' },
+                { clipPath: 'inset(0 0 0 0)', transform: 'scale(1)', filter: 'brightness(1)' }
+              ],
+              { duration: 820, easing: EASE }
+            );
+            const leave = from.animate(
+              [
+                { transform: 'scale(1)', filter: 'blur(0px) brightness(1)', opacity: 1 },
+                { transform: 'scale(0.965)', filter: 'blur(6px) brightness(0.7)', opacity: 0.4 }
+              ],
+              { duration: 820, easing: EASE }
+            );
+            leave.onfinish = () => { if (!from.classList.contains('is-active')) from.classList.remove('is-leaving'); };
+          });
+
+          // Warm the frame after this one so the next wipe never waits on the network.
+          ensureLoaded(shots[(next + 1) % shots.length]);
+        }
+
+        // Auto-advance is driven by the progress bar itself: when it fills, move on.
+        tour.addEventListener('animationend', (e) => {
+          if (e.animationName === 'tourFill') go(index + 1, { scrollChip: true });
         });
-      });
+
+        steps.forEach((step, i) => {
+          step.addEventListener('click', () => go(i, { backward: i < index }));
+          step.addEventListener('keydown', (e) => {
+            const keys = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
+            let target = null;
+            if (e.key in keys) target = (i + keys[e.key] + steps.length) % steps.length;
+            if (e.key === 'Home') target = 0;
+            if (e.key === 'End') target = steps.length - 1;
+            if (target === null) return;
+            e.preventDefault();
+            go(target, { backward: target < i, scrollChip: true });
+            steps[target].focus();
+          });
+        });
+
+        tour.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') { hovering = true; syncPaused(); } });
+        tour.addEventListener('pointerleave', () => { hovering = false; syncPaused(); });
+        tour.addEventListener('focusin', () => { hovering = true; syncPaused(); });
+        tour.addEventListener('focusout', (e) => { if (!tour.contains(e.relatedTarget)) { hovering = false; syncPaused(); } });
+        document.addEventListener('visibilitychange', syncPaused);
+
+        toggle.addEventListener('click', () => {
+          userPaused = !userPaused;
+          tour.classList.toggle('is-user-paused', userPaused);
+          toggle.setAttribute('aria-pressed', String(userPaused));
+          toggleLabel.textContent = userPaused ? 'Play tour' : 'Pause tour';
+          syncPaused();
+        });
+
+        if ('IntersectionObserver' in window) {
+          new IntersectionObserver((entries) => {
+            inView = entries[0].isIntersecting;
+            syncPaused();
+          }, { threshold: 0.35 }).observe(tour);
+        } else {
+          inView = true;
+        }
+
+        // The site theme toggle swaps every loaded frame to its matching app theme.
+        new MutationObserver(() => {
+          shots.forEach((img) => { if (img.getAttribute('src')) img.setAttribute('src', srcFor(img)); });
+        }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+        if (reduceMotion) tour.classList.add('is-static');
+        ensureLoaded(shots[0]);
+        syncPaused();
+      })();
 
       /* ------------------------------------------------------------------------
          1. THEME SWITCHER & PREFERS-COLOR-SCHEME
