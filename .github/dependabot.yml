@@ -8,6 +8,12 @@ updates:
     groups:
       codemirror:
         patterns: ['@codemirror/*', '@lezer/*', 'codemirror']
+      # Vite majors only work with a matching electron-vite, so update them together.
+      build-tooling:
+        patterns: ['vite', 'electron-vite', '@vitejs/*']
+      # Mermaid bundles its own KaTeX; keep the two on compatible versions.
+      rendering:
+        patterns: ['mermaid', 'katex']
   - package-ecosystem: github-actions
     directory: /
     schedule:

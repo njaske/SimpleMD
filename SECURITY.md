@@ -25,4 +25,3 @@ SimpleMD opens Markdown files that may come from untrusted sources (downloads, A
 
 - Releases are **not code-signed**; Windows SmartScreen will warn. Verify downloads with `SHA256SUMS.txt`.
 - Remote `https:` images in a document reveal your IP address to that image host, as in any browser.
-- `npm audit` reports an advisory in KaTeX (prototype pollution that bypasses the `trust` option). SimpleMD never enables `trust`, so it is not exploitable here; the fix requires a breaking KaTeX upgrade that Mermaid does not yet support.

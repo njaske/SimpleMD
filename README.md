@@ -150,7 +150,7 @@ Full details and how to report a vulnerability privately: [SECURITY.md](SECURITY
 
 ## Build from source
 
-Requires [Node.js](https://nodejs.org) 22 or newer.
+Requires [Node.js](https://nodejs.org) 22.12 or newer.
 
 ```bash
 git clone https://github.com/njaske/SimpleMD.git
