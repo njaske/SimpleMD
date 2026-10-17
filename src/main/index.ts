@@ -1,6 +1,6 @@
 import { app, BrowserWindow, Menu, session, shell } from 'electron'
 import { join } from 'path'
-import { registerIpc, restoreAccess } from './ipc'
+import { openFromSecondInstance, prepareLaunch, registerIpc, restoreAccess } from './ipc'
 import { saveSettings } from './settings'
 
 const RENDERER_DEV_URL = process.env['ELECTRON_RENDERER_URL']
@@ -99,12 +99,13 @@ const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv, workingDirectory) => {
     const win = BrowserWindow.getAllWindows()[0]
-    if (win) {
-      if (win.isMinimized()) win.restore()
-      win.focus()
-    }
+    if (!win) return
+    if (win.isMinimized()) win.restore()
+    win.focus()
+    // In development argv carries Electron's own arguments, not user files.
+    if (app.isPackaged) void openFromSecondInstance(argv.slice(1), workingDirectory, win)
   })
 
   app.whenReady().then(async () => {
@@ -114,6 +115,7 @@ if (!gotLock) {
     const initialFolder = process.env['SIMPLEMD_INITIAL_FOLDER']
     if (initialFolder) await saveSettings({ lastFolder: initialFolder })
     await restoreAccess()
+    if (app.isPackaged) await prepareLaunch(process.argv.slice(1), process.cwd())
     applyContentSecurityPolicy()
     denyPermissionRequests()
     registerIpc()

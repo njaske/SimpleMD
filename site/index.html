@@ -6,7 +6,9 @@
   <title>SimpleMD — Markdown, beautifully simple.</title>
   <meta name="description" content="A fast, distraction-free desktop Markdown reader and editor for Windows built for the age of AI. Renders KaTeX math and Mermaid diagrams inline, 100% local, one-click PDF export.">
   
-  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="canonical" href="https://njaske.github.io/SimpleMD/">
   <meta name="theme-color" content="#1a1a1a">
   <meta property="og:type" content="website">
@@ -1560,7 +1562,9 @@
 
     .line-numbers-gutter {
       width: 48px;
-      padding: 24px 8px 24px 0;
+      /* Extra bottom padding: the textarea's horizontal scrollbar shortens it, so
+         the gutter needs the same scroll range to stay aligned at the end. */
+      padding: 24px 8px 40px 0;
       text-align: right;
       font-family: var(--font-mono);
       font-size: 0.8125rem;
@@ -2812,8 +2816,8 @@
         <div class="mockup-sidebar-header">
           <span class="mockup-sidebar-title">EXPLORER</span>
           <div class="mockup-sidebar-actions">
-            <span class="mockup-ghost-btn">Open</span>
-            <span class="mockup-ghost-btn">Open</span>
+            <span class="mockup-ghost-btn">Files</span>
+            <span class="mockup-ghost-btn">Folder</span>
           </div>
         </div>
         <div class="mockup-sidebar-body">
@@ -4266,6 +4270,10 @@ $$ T_{\\text{render}} = \\mathcal{O}(N) + \\sum_{k=1}^K t_{\\text{math}}(k) $$
 
       if (demoTextarea) {
         demoTextarea.addEventListener('input', updateEditorMetrics);
+        // Keep the line numbers aligned with the code as the editor scrolls.
+        const syncGutter = () => { if (lineGutter) lineGutter.scrollTop = demoTextarea.scrollTop; };
+        demoTextarea.addEventListener('scroll', syncGutter, { passive: true });
+        demoTextarea.addEventListener('input', syncGutter);
 
         // Keyboard navigation: Escape key blurs; Tab indents without trapping
         demoTextarea.addEventListener('keydown', function (e) {

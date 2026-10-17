@@ -18,6 +18,13 @@ electronFuses:
   enableNodeCliInspectArguments: false
   enableEmbeddedAsarIntegrityValidation: true
   onlyLoadAppFromAsar: true
+# Register SimpleMD as a handler for Markdown files, so Explorer's "Open with"
+# list shows it (as "SimpleMD") and double-click / Open with passes the file path.
+fileAssociations:
+  - ext: [md, markdown, mdown, mkd, mdx, markdn]
+    name: Markdown Document
+    description: Markdown Document
+    role: Editor
 win:
   target:
     - target: nsis

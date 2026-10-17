@@ -197,6 +197,8 @@ export function installDevApi(): void {
       { path: '/Sample Folder/Loose Note.md', content: '# Loose Note\n\nOpened as an individual file, grouped by its folder.' }
     ],
     resolveDrop: async () => ({ folder: null, files: [] }),
+    takeLaunchFiles: async () => null,
+    onOpenPaths: () => () => {},
     scanFolder: async () => scan,
     readFile: async (path) => contents[path] ?? '',
     saveFile: async (path, content) => {

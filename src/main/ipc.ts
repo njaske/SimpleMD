@@ -4,8 +4,10 @@ import { dirname } from 'path'
 import { approveFile, approveRoot, isApproved, isApprovedRoot } from './access'
 import { readImageDataUrl, readMdFile, readMdFiles, resolveDrop, saveMdFile, scanFolder } from './fs-md'
 import { loadSettings, saveSettings } from './settings'
+import { extractLaunchPaths } from './launch'
 import { pickRendererSettings } from './settings-schema'
 import { watchFolder } from './watcher'
+import type { DropResult } from '../shared/types'
 
 /** A BrowserWindow carrying close-guard flags set over IPC. */
 type GuardedWindow = BrowserWindow & { _hasUnsaved?: boolean; _forceClose?: boolean }
@@ -22,10 +24,42 @@ async function grantFiles(paths: string[]): Promise<void> {
 }
 
 /** Grant access to a workspace folder and remember it as the last folder. */
-async function grantRoot(root: string, sender: Electron.WebContents): Promise<void> {
+async function grantRoot(root: string, sender?: Electron.WebContents): Promise<void> {
   approveRoot(root)
   await saveSettings({ lastFolder: root })
-  watchFolder(root, sender)
+  if (sender) watchFolder(root, sender)
+}
+
+// Files/folders given on the command line (double-click, "Open with", a second
+// launch while SimpleMD is already running). The user chose them in the shell, so
+// they are granted like a dialog pick. Held until the renderer asks for them.
+let pendingLaunch: DropResult | null = null
+
+async function resolveLaunch(args: readonly string[], cwd: string): Promise<DropResult | null> {
+  const paths = extractLaunchPaths(args, cwd)
+  if (!paths.length) return null
+  const result = await resolveDrop(paths)
+  if (!result.folder && result.files.length === 0) return null
+  if (result.folder) await grantRoot(result.folder.root)
+  await grantFiles(result.files.map((f) => f.path))
+  return result
+}
+
+/** Called once at startup with the process arguments (without the executable). */
+export async function prepareLaunch(args: readonly string[], cwd: string): Promise<void> {
+  pendingLaunch = await resolveLaunch(args, cwd)
+}
+
+/** Called when the user opens another file while SimpleMD is already running. */
+export async function openFromSecondInstance(
+  args: readonly string[],
+  cwd: string,
+  win: BrowserWindow
+): Promise<void> {
+  const result = await resolveLaunch(args, cwd)
+  if (!result) return
+  if (result.folder) watchFolder(result.folder.root, win.webContents)
+  win.webContents.send('app:open-paths', result)
 }
 
 /** Re-grant what the user opened in earlier sessions. Older settings files have
@@ -88,6 +122,13 @@ export function registerIpc(): void {
   })
 
   // Re-scan a folder the user already opened (startup restore, external changes).
+  ipcMain.handle('app:takeLaunchFiles', (event) => {
+    const pending = pendingLaunch
+    pendingLaunch = null
+    if (pending?.folder) watchFolder(pending.folder.root, event.sender)
+    return pending
+  })
+
   ipcMain.handle('fs:scanFolder', async (event, path: unknown) => {
     if (!isApprovedRoot(path)) denied()
     const scan = await scanFolder(path)

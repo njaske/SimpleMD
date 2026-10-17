@@ -3,6 +3,7 @@ import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 
 import hljs from 'highlight.js/lib/common'
 import type {
   Activity,
+  DropResult,
   FolderScan,
   MdFileInfo,
   MdFolderInfo,
@@ -108,6 +109,7 @@ export default class App extends Component<Record<string, never>, AppState> {
   private unsubMax: (() => void) | null = null
   private unsubFolderChanged: (() => void) | null = null
   private unsubRequestClose: (() => void) | null = null
+  private unsubOpenPaths: (() => void) | null = null
   private persistTimer: ReturnType<typeof setTimeout> | null = null
   private noteTimer: ReturnType<typeof setTimeout> | null = null
   private lastPersist = ''
@@ -156,6 +158,7 @@ export default class App extends Component<Record<string, never>, AppState> {
     window.api.win.isMaximized().then((v) => this.setState({ isMaximized: v }))
     this.unsubFolderChanged = window.api.onFolderChanged(() => this.reconcileFolder())
     this.unsubRequestClose = window.api.onRequestClose(() => this.setState({ closePrompt: true }))
+    this.unsubOpenPaths = window.api.onOpenPaths(this.openResult)
     window.addEventListener('keydown', this.onKey)
     // Safety net so a cancelled/interrupted drag never leaves the overlay stuck.
     window.addEventListener('dragend', this.resetDrag)
@@ -170,6 +173,7 @@ export default class App extends Component<Record<string, never>, AppState> {
     this.unsubMax?.()
     this.unsubFolderChanged?.()
     this.unsubRequestClose?.()
+    this.unsubOpenPaths?.()
     if (this.noteTimer) clearTimeout(this.noteTimer)
     // Flush any pending settings write so nothing is lost on close.
     if (this.persistTimer) {
@@ -241,6 +245,11 @@ export default class App extends Component<Record<string, never>, AppState> {
         return { openTabs, activeId }
       }, () => this.renderDoc(true))
     }
+
+    // Files opened from the shell (double-click, "Open with") that started this
+    // launch go on top of the restored session.
+    const launched = await window.api.takeLaunchFiles()
+    if (launched) this.openResult(launched)
   }
 
   private applyProps(): void {
@@ -485,6 +494,12 @@ export default class App extends Component<Record<string, never>, AppState> {
       )
       return
     }
+    this.openResult(result)
+  }
+
+  /** Show what the main process resolved from a drop, a launch argument or
+   *  a file opened from the shell. */
+  private openResult = (result: DropResult): void => {
     if (result.folder) this.applyScan(result.folder, { openAll: true, focusFiles: true })
     if (result.files.length) this.addLooseFiles(result.files)
   }

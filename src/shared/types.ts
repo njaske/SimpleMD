@@ -66,6 +66,10 @@ export interface Settings {
 export interface Api {
   openFolder: () => Promise<FolderScan | null>
   openFiles: () => Promise<OpenedFile[] | null>
+  /** Files/folders passed on the command line at launch (double-click, "Open with"), once. */
+  takeLaunchFiles: () => Promise<DropResult | null>
+  /** Subscribe to files/folders opened from the shell while SimpleMD is already running. */
+  onOpenPaths: (cb: (result: DropResult) => void) => () => void
   /** Open dropped files/folders. Paths are resolved in the preload from the real File objects. */
   resolveDrop: (files: File[]) => Promise<DropResult>
   scanFolder: (path: string) => Promise<FolderScan | null>

@@ -4,6 +4,12 @@ import type { Api, DropResult, FolderScan, OpenedFile, Settings } from '../share
 const api: Api = {
   openFolder: () => ipcRenderer.invoke('dialog:openFolder') as Promise<FolderScan | null>,
   openFiles: () => ipcRenderer.invoke('dialog:openFiles') as Promise<OpenedFile[] | null>,
+  takeLaunchFiles: () => ipcRenderer.invoke('app:takeLaunchFiles') as Promise<DropResult | null>,
+  onOpenPaths: (cb) => {
+    const handler = (_event: Electron.IpcRendererEvent, result: DropResult): void => cb(result)
+    ipcRenderer.on('app:open-paths', handler)
+    return () => ipcRenderer.removeListener('app:open-paths', handler)
+  },
   // Paths come from webUtils here, never from the page, so a compromised renderer
   // cannot grant itself access to arbitrary paths through a fake drop.
   resolveDrop: (files) =>
