@@ -11,6 +11,9 @@ updates:
       # Vite majors only work with a matching electron-vite, so update them together.
       build-tooling:
         patterns: ['vite', 'electron-vite', '@vitejs/*']
+      # react and react-dom must always be on the same version.
+      react:
+        patterns: ['react', 'react-dom', '@types/react', '@types/react-dom']
       # Mermaid bundles its own KaTeX; keep the two on compatible versions.
       rendering:
         patterns: ['mermaid', 'katex']
