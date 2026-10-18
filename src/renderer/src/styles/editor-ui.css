@@ -1,0 +1,227 @@
+/* Editor chrome: the format bar, its menus and tooltips, and the editor's inline notice.
+   Colours come from the design tokens; every var() carries a Paper fallback so the bar
+   reads well on its own. Shared control classes (.smd-iconbtn, .smd-divider-v) get
+   zero-specificity defaults here so the app's own definitions always win. */
+
+/* ---- editor host -------------------------------------------------------------------- */
+
+.smd-editor {
+  position: relative;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+.smd-editor__host { height: 100%; }
+
+/* ---- format bar ----------------------------------------------------------------------- */
+
+.smd-formatbar {
+  position: relative;
+  z-index: 3;
+  flex: none;
+  height: 36px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  background: var(--bg, #fefdfb);
+  border-bottom: 1px solid var(--border, #ece9e3);
+  font-family: var(--ui-font, 'Inter Variable', system-ui, sans-serif);
+  font-size: 13px;
+  color: var(--fg-muted, #5c5852);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Lines up with the editor's centred text column in wide panes. */
+.smd-formatbar__inner {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  min-width: 0;
+}
+
+.smd-fmt-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.smd-fmt-anchor { position: relative; display: flex; align-items: center; }
+
+:where(.smd-divider-v) {
+  display: block;
+  width: 1px;
+  height: 16px;
+  background: var(--border-strong, #dcd8d0);
+}
+.smd-fmt-divider { margin: 0 5px; opacity: .8; }
+
+:where(.smd-iconbtn) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-s, 6px);
+  background: transparent;
+  color: var(--fg-muted, #5c5852);
+  cursor: pointer;
+  transition: background-color var(--dur-fast, 120ms) var(--ease-out, ease), color var(--dur-fast, 120ms) var(--ease-out, ease);
+}
+:where(.smd-iconbtn):hover { background: var(--bg-hover, color-mix(in oklch, var(--fg, #1f1e1c) 6%, transparent)); color: var(--fg, #1f1e1c); }
+:where(.smd-iconbtn):active,
+:where(.smd-iconbtn.is-active) { background: var(--bg-active, color-mix(in oklch, var(--fg, #1f1e1c) 10%, transparent)); color: var(--fg, #1f1e1c); }
+:where(.smd-iconbtn):focus-visible {
+  outline: 2px solid var(--focus, var(--accent, #c0392b));
+  outline-offset: 1px;
+}
+
+.smd-fmt-btn { flex: none; }
+.smd-fmt-btn svg { display: block; transition: transform var(--dur-fast, 120ms) var(--ease-out, ease); }
+.smd-fmt-btn:active svg { transform: scale(.92); }
+
+.smd-fmt-trigger--heading { width: auto; padding: 0 5px 0 6px; gap: 1px; }
+.smd-fmt-trigger--heading svg:last-child { opacity: .7; transition: transform var(--dur-fast, 120ms) var(--ease-out, ease); }
+.smd-fmt-trigger--heading[aria-expanded='true'] svg:last-child { transform: rotate(180deg); }
+
+/* ---- tooltip ----------------------------------------------------------------------------- */
+
+.smd-fmt-tip {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-s, 6px);
+  background: var(--fg, #1f1e1c);
+  color: var(--bg, #fefdfb);
+  font: 500 12px/1.3 var(--ui-font, 'Inter Variable', system-ui, sans-serif);
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow-1, 0 2px 8px rgba(0, 0, 0, .14));
+  animation: smdFmtTip var(--dur-fast, 120ms) var(--ease-out, ease) both;
+}
+.smd-fmt-tip__kbd {
+  font: 500 11px/1 var(--ui-font, 'Inter Variable', system-ui, sans-serif);
+  letter-spacing: .02em;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--bg, #fefdfb) 16%, transparent);
+  color: color-mix(in oklch, var(--bg, #fefdfb) 78%, transparent);
+}
+@keyframes smdFmtTip { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+
+/* ---- menus ---------------------------------------------------------------------------------- */
+
+.smd-fmt-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 30;
+  min-width: 212px;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 5px;
+  border: 1px solid var(--border, #ece9e3);
+  border-radius: var(--radius-m, 10px);
+  background: var(--bg-elev, var(--bg, #ffffff));
+  box-shadow: var(--shadow-2, 0 10px 30px rgba(0, 0, 0, .12));
+  color: var(--fg, #1f1e1c);
+  transform-origin: top left;
+  animation: smdFmtMenu 160ms var(--ease-out, cubic-bezier(.2, .7, .2, 1)) both;
+}
+.smd-fmt-menu--start { left: -4px; }
+.smd-fmt-menu--end { right: -4px; transform-origin: top right; }
+@keyframes smdFmtMenu { from { opacity: 0; transform: scale(.98) translateY(-2px); } to { opacity: 1; transform: none; } }
+
+.smd-fmt-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 32px;
+  padding: 5px 8px 5px 10px;
+  border: none;
+  border-radius: var(--radius-s, 6px);
+  background: transparent;
+  color: inherit;
+  font: 400 13px/1.3 var(--ui-font, 'Inter Variable', system-ui, sans-serif);
+  text-align: left;
+  cursor: pointer;
+}
+.smd-fmt-menu__item:hover,
+.smd-fmt-menu__item:focus-visible { background: var(--bg-hover, color-mix(in oklch, var(--fg, #1f1e1c) 6%, transparent)); outline: none; }
+.smd-fmt-menu__item:focus-visible { box-shadow: inset 0 0 0 1.5px var(--focus, var(--accent, #c0392b)); }
+.smd-fmt-menu__item:active { background: var(--bg-active, color-mix(in oklch, var(--fg, #1f1e1c) 10%, transparent)); }
+
+.smd-fmt-menu__icon { display: inline-flex; color: var(--fg-muted, #5c5852); }
+.smd-fmt-menu__label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.smd-fmt-menu__hint {
+  flex: none;
+  margin-left: 20px;
+  font: 500 11.5px/1 var(--ui-font, 'Inter Variable', system-ui, sans-serif);
+  color: var(--fg-faint, #76716a);
+  letter-spacing: .01em;
+}
+.smd-fmt-menu__sep { height: 1px; margin: 5px 6px; background: var(--border, #ece9e3); }
+
+/* Each text style previews itself, in the reading face. */
+.smd-fmt-menu__item--h1 .smd-fmt-menu__label,
+.smd-fmt-menu__item--h2 .smd-fmt-menu__label,
+.smd-fmt-menu__item--h3 .smd-fmt-menu__label { font-family: var(--read-font, 'Literata Variable', Georgia, serif); letter-spacing: -.01em; }
+.smd-fmt-menu__item--h1 { min-height: 38px; }
+.smd-fmt-menu__item--h1 .smd-fmt-menu__label { font-size: 19px; font-weight: 650; }
+.smd-fmt-menu__item--h2 .smd-fmt-menu__label { font-size: 16.5px; font-weight: 650; }
+.smd-fmt-menu__item--h3 .smd-fmt-menu__label { font-size: 14.5px; font-weight: 650; }
+.smd-fmt-menu__item--h0 .smd-fmt-menu__label { font-size: 13px; color: var(--fg-muted, #5c5852); }
+
+/* ---- inline notice -------------------------------------------------------------------------- */
+
+.smd-editor-notices {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 18px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 5;
+}
+.smd-editor-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+  padding: 8px 14px 8px 11px;
+  border: 1px solid var(--border, #ece9e3);
+  border-radius: 999px;
+  background: var(--bg-elev, var(--bg, #ffffff));
+  color: var(--fg, #1f1e1c);
+  box-shadow: var(--shadow-2, 0 10px 30px rgba(0, 0, 0, .12));
+  font: 500 12.5px/1.35 var(--ui-font, 'Inter Variable', system-ui, sans-serif);
+  animation: smdFmtNotice var(--dur-med, 180ms) var(--ease-out, ease) both;
+}
+.smd-editor-notice svg { flex: none; color: var(--accent-fg, var(--accent, #c0392b)); }
+@keyframes smdFmtNotice { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* ---- motion preferences ------------------------------------------------------------------------ */
+
+.smd-reduce-motion .smd-fmt-tip,
+.smd-reduce-motion .smd-fmt-menu,
+.smd-reduce-motion .smd-editor-notice { animation: none; }
+.smd-reduce-motion .smd-fmt-btn svg,
+.smd-reduce-motion .smd-fmt-trigger svg { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .smd-fmt-tip, .smd-fmt-menu, .smd-editor-notice { animation: none; }
+}
+
+@media print {
+  .smd-formatbar, .smd-editor-notices { display: none !important; }
+}

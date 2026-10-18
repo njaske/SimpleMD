@@ -1,13 +1,12 @@
-import { useEffect, useRef } from 'react'
-import { EditorState, Compartment } from '@codemirror/state'
-import { EditorView, keymap } from '@codemirror/view'
-import { basicSetup } from 'codemirror'
-import { indentWithTab } from '@codemirror/commands'
-import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
-import { languages } from '@codemirror/language-data'
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
-import { tags as t } from '@lezer/highlight'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { Compartment, EditorState } from '@codemirror/state'
+import { EditorView } from '@codemirror/view'
+import '@fontsource-variable/jetbrains-mono'
 import type { EditorHandle } from '@/lib/editor/types'
+import { createEditorHandle } from '@/lib/editor/handle'
+import { darkTheme, editorExtensions } from '@/lib/editor/setup'
+import { ImageIcon } from '@/lib/editor/formatIcons'
+import '@/styles/editor-ui.css'
 
 export interface EditorJump {
   fileId: string
@@ -29,112 +28,69 @@ interface Props {
   /** Save a pasted/dropped image next to the document; resolves to the relative link
    *  path ("assets/x.png"), or null when the document has no folder yet (untitled). */
   onSaveImage?: (file: File) => Promise<string | null>
+  /** Short messages for the user ("Save this document first to add images"). When this
+   *  is omitted the editor shows them itself as a small inline notice. */
+  onNotice?: (message: string) => void
 }
 
-// Colors come from the app's CSS custom properties, so a single theme tracks
-// both light and dark automatically (the .smd-root class drives the vars).
-const smdTheme = EditorView.theme({
-  '&': { color: 'var(--fg)', backgroundColor: 'var(--bg)', height: '100%', fontSize: '13.5px' },
-  '.cm-scroller': { fontFamily: 'var(--mono)', lineHeight: '1.62', overflow: 'auto' },
-  '.cm-content': { padding: '24px 8px 200px', caretColor: 'var(--accent)' },
-  '.cm-gutters': { backgroundColor: 'var(--bg)', color: 'var(--fg-faint)', border: 'none' },
-  '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--fg-muted)' },
-  '.cm-activeLine': { backgroundColor: 'color-mix(in oklch, var(--fg) 3%, transparent)' },
-  '.cm-foldGutter': { color: 'var(--fg-faint)' },
-  '&.cm-focused': { outline: 'none' },
-  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)' },
-  '.cm-selectionBackground, .cm-content ::selection': { backgroundColor: 'var(--sel)' },
-  '&.cm-focused .cm-selectionBackground': { backgroundColor: 'var(--sel)' },
-  '.cm-selectionMatch': { backgroundColor: 'var(--accent-soft)' },
-  '.cm-matchingBracket, &.cm-focused .cm-matchingBracket': {
-    backgroundColor: 'var(--accent-soft)',
-    outline: 'none'
-  },
-  '.cm-searchMatch': { backgroundColor: 'var(--accent-soft)', borderRadius: '2px' },
-  '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'var(--sel)' },
-  '.cm-panels': { backgroundColor: 'var(--bg-elev)', color: 'var(--fg)' },
-  '.cm-panels.cm-panels-bottom': { borderTop: '1px solid var(--border)' },
-  '.cm-panel.cm-search': { padding: '6px 8px', fontFamily: "'Helvetica Neue',Helvetica,Arial,sans-serif" },
-  '.cm-panel.cm-search input, .cm-panel.cm-search button, .cm-textfield': {
-    backgroundColor: 'var(--bg)',
-    color: 'var(--fg)',
-    border: '1px solid var(--border-strong)',
-    borderRadius: '5px',
-    fontSize: '12px'
-  },
-  '.cm-button': { backgroundColor: 'var(--bg-elev2)', backgroundImage: 'none' },
-  '.cm-tooltip': {
-    backgroundColor: 'var(--bg)',
-    border: '1px solid var(--border-strong)',
-    color: 'var(--fg)',
-    borderRadius: '8px'
-  },
-  '.cm-tooltip-autocomplete ul li[aria-selected]': {
-    backgroundColor: 'var(--accent-soft)',
-    color: 'var(--fg)'
-  }
-})
+const DEFAULT_FONT_SIZE = 14
+const NOTICE_MS = 4000
 
-const smdHighlight = HighlightStyle.define([
-  { tag: [t.heading, t.heading1, t.heading2, t.heading3], color: 'var(--fg)', fontWeight: '650' },
-  { tag: t.strong, fontWeight: '700', color: 'var(--fg)' },
-  { tag: t.emphasis, fontStyle: 'italic' },
-  { tag: t.strikethrough, textDecoration: 'line-through', color: 'var(--fg-faint)' },
-  { tag: [t.link, t.url], color: 'var(--accent)' },
-  { tag: t.quote, color: 'var(--fg-muted)', fontStyle: 'italic' },
-  { tag: [t.processingInstruction, t.contentSeparator], color: 'var(--fg-faint)' },
-  { tag: t.list, color: 'var(--accent)' },
-  { tag: t.keyword, color: 'var(--tok-kw)', fontWeight: '600' },
-  { tag: [t.string, t.special(t.string)], color: 'var(--tok-str)' },
-  { tag: [t.comment, t.lineComment, t.blockComment], color: 'var(--tok-com)', fontStyle: 'italic' },
-  { tag: [t.number, t.bool], color: 'var(--tok-num)' },
-  { tag: [t.function(t.variableName), t.labelName, t.definition(t.function(t.variableName))], color: 'var(--tok-fn)' },
-  { tag: [t.typeName, t.className, t.tagName], color: 'var(--tok-kw)' },
-  { tag: [t.propertyName, t.attributeName, t.variableName], color: 'var(--fg-muted)' },
-  { tag: [t.operator, t.punctuation, t.bracket], color: 'var(--tok-punc)' },
-  { tag: t.monospace, color: 'var(--fg)' }
-])
+/** The editor's own inline notice, used when the App doesn't take notices itself. */
+function useInlineNotice() {
+  const [notice, setNotice] = useState<{ text: string; id: number } | null>(null)
+  const timer = useRef<number | undefined>(undefined)
+  const show = useCallback((text: string) => {
+    window.clearTimeout(timer.current)
+    setNotice({ text, id: Date.now() })
+    timer.current = window.setTimeout(() => setNotice(null), NOTICE_MS)
+  }, [])
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+  return { notice, show }
+}
 
-export default function CodeEditor({ value, onChange, isDark, jump }: Props) {
+export default function CodeEditor({ value, onChange, isDark, jump, fontSize = DEFAULT_FONT_SIZE, onReady, onSaveImage, onNotice }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
-  const onChangeRef = useRef(onChange)
-  onChangeRef.current = onChange
-  const darkComp = useRef(new Compartment())
+  // Callbacks change identity every render; the editor reads them through refs.
+  const latest = useRef({ onChange, onReady, onSaveImage, onNotice })
+  latest.current = { onChange, onReady, onSaveImage, onNotice }
+  const darkMode = useRef(new Compartment())
   // Last text the editor itself reported, so the sync effect below can skip a
   // full-document comparison for the echo of the user's own keystroke.
   const lastEmitted = useRef(value)
+  const inline = useInlineNotice()
+  const showInline = inline.show
 
   // Create the editor once per mount. The parent keys this component by file id,
   // so switching files remounts with a clean state/history and the right content.
   useEffect(() => {
     if (!host.current) return
-    const listener = EditorView.updateListener.of((u) => {
-      if (u.docChanged) {
-        const text = u.state.doc.toString()
-        lastEmitted.current = text
-        onChangeRef.current(text)
-      }
-    })
     const view = new EditorView({
       parent: host.current,
       state: EditorState.create({
         doc: value,
-        extensions: [
-          basicSetup,
-          keymap.of([indentWithTab]),
-          EditorView.lineWrapping,
-          markdown({ base: markdownLanguage, codeLanguages: languages }),
-          smdTheme,
-          syntaxHighlighting(smdHighlight),
-          darkComp.current.of(EditorView.theme({}, { dark: isDark })),
-          listener
-        ]
+        extensions: editorExtensions({
+          isDark,
+          darkMode: darkMode.current,
+          images: {
+            save: () => latest.current.onSaveImage,
+            notice: (message) => (latest.current.onNotice ?? showInline)(message)
+          },
+          onDocChange: (text) => {
+            lastEmitted.current = text
+            latest.current.onChange(text)
+          }
+        })
       })
     })
     viewRef.current = view
+    const controller = createEditorHandle(view)
+    latest.current.onReady?.(controller.handle)
     view.focus()
     return () => {
+      latest.current.onReady?.(null)
+      controller.destroy()
       view.destroy()
       viewRef.current = null
     }
@@ -155,10 +111,13 @@ export default function CodeEditor({ value, onChange, isDark, jump }: Props) {
 
   // Track the app theme for CodeMirror's internal dark/light defaults.
   useEffect(() => {
-    const view = viewRef.current
-    if (!view) return
-    view.dispatch({ effects: darkComp.current.reconfigure(EditorView.theme({}, { dark: isDark })) })
+    viewRef.current?.dispatch({ effects: darkMode.current.reconfigure(darkTheme(isDark)) })
   }, [isDark])
+
+  // A new text size changes every line height; let CodeMirror re-measure.
+  useEffect(() => {
+    viewRef.current?.requestMeasure()
+  }, [fontSize])
 
   // Jump to a match (from the search panel) and select it.
   useEffect(() => {
@@ -177,5 +136,18 @@ export default function CodeEditor({ value, onChange, isDark, jump }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jump?.nonce])
 
-  return <div ref={host} className="smd-editor" style={{ height: '100%', minWidth: 0, overflow: 'hidden' }} />
+  const style = { '--smd-editor-size': `${fontSize}px` } as CSSProperties
+  return (
+    <div className="smd-editor" style={style}>
+      <div ref={host} className="smd-editor__host" />
+      <div className="smd-editor-notices" role="status" aria-live="polite">
+        {inline.notice && (
+          <div key={inline.notice.id} className="smd-editor-notice">
+            <ImageIcon size={15} />
+            <span>{inline.notice.text}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }

@@ -10,6 +10,8 @@ export type FormatCommand =
   | 'heading1'
   | 'heading2'
   | 'heading3'
+  /** Turns heading lines back into plain paragraphs (the heading dropdown's last row). */
+  | 'paragraph'
   | 'quote'
   | 'bulletList'
   | 'numberedList'
