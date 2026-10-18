@@ -1,4 +1,9 @@
 // Sample documents for the browser-only preview (see devApi.ts). Dev builds only.
+// The showcase notes are the real files from sample-notes/, imported as text.
+import AI_ANSWER from '../../../../sample-notes/AI Answers/Caching Strategies.md?raw'
+import MESSY_PASTE from '../../../../sample-notes/AI Answers/Messy Paste.md?raw'
+import AGENT_PLAN from '../../../../sample-notes/Agent Docs/Offline Sync Plan.md?raw'
+import SHORTCUTS from '../../../../sample-notes/Getting Started/Keyboard Shortcuts.md?raw'
 
 const WELCOME = `# Welcome to SimpleMD
 
@@ -137,46 +142,6 @@ flowchart LR
 \`\`\`
 `
 
-const AI_ANSWER = `---
-title: Caching strategies
-source: ChatGPT
-tags: [systems, caching]
----
-
-# Caching strategies, explained
-
-> [!NOTE]
-> This answer was pasted straight from a chat. SimpleMD renders it as-is.
-
-A cache trades memory for latency. The hit ratio \\(h\\) sets the average access time:
-
-\\[ T_{avg} = h \\cdot T_{cache} + (1 - h) \\cdot T_{origin} \\]
-
-> [!TIP]
-> Start with a short TTL and raise it once you trust your invalidation.
-
-> [!WARNING]
-> Never cache responses that carry per-user secrets under a shared key.
-
-## Checklist
-
-- [x] Measure the hit ratio
-- [ ] Add jitter to TTLs[^jitter]
-- [ ] Warm the cache on deploy
-
-\`\`\`math
-\\text{speedup} = \\frac{T_{origin}}{T_{avg}}
-\`\`\`
-
-| Strategy | Good for | Risk |
-| --- | --- | --- |
-| Cache-aside | Read-heavy data | Stale reads |
-| Write-through | Consistency | Write latency |
-| Write-back | Write bursts | Data loss on crash |
-
-[^jitter]: Random jitter spreads expirations so keys don't all expire at once.
-`
-
 const AGENTS = `# AGENTS.md
 
 Instructions for coding agents working in this repository.
@@ -190,8 +155,11 @@ export const DEV_SAMPLE_FILES: Record<string, Array<[string, string]>> = {
     ['Neural Networks.md', SHOWCASE],
     ['AI Answer.md', AI_ANSWER],
     ['Welcome.md', WELCOME],
-    ['Markdown Guide.md', GUIDE]
+    ['Markdown Guide.md', GUIDE],
+    ['Keyboard Shortcuts.md', SHORTCUTS]
   ],
+  'AI Answers': [['Messy Paste.md', MESSY_PASTE]],
+  'Agent Docs': [['Offline Sync Plan.md', AGENT_PLAN]],
   Projects: [['Q3 Roadmap.md', ROADMAP]],
   Math: [['Polynomials.md', MATH]],
   Diagrams: [['Flowchart.md', DIAGRAM]],

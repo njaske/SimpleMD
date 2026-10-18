@@ -1,22 +1,39 @@
 import type { ResolvedTheme, ViewMode } from '@shared/types'
-import { parseMarkdown, prepareMarkdown } from '@/lib/markdown'
-import { highlightCode } from '@/lib/highlight'
-import { computeOutline } from '@/lib/document'
+import {
+  FIX_DIAGRAM,
+  isLargeDocument,
+  planProgressive,
+  prepareMarkdown,
+  renderMarkdown,
+  type RenderChunk
+} from '@/lib/markdown'
 import type { LineRange } from '@/lib/ranges'
+import { lineAtOffset, measureAnchors, offsetOfLine, type Anchor } from './anchors'
+import { markChanges, nextChange, unmarkChanges } from './changes'
+import { decorateCodeBlocks } from './codeBlocks'
+import { FindState, type FindResult } from './find'
+import { activeHeading, assignHeadingIds, headingSlugs, type HeadingSlugs } from './headings'
+import { enhanceImages, isLoadImagesControl, loadBlocked } from './images'
+import { renderMermaid, type MermaidJob } from './mermaid'
 
-export type { LineRange }
+export type { LineRange, FindResult }
 
 // Owns the rendered-document pane ("reader"): turning Markdown into the article
-// DOM, the async work that follows (images, diagrams), clicks inside it, and the
-// scroll/find/highlight helpers the rest of the app drives. The App only tells it
-// what to show; it never touches the article DOM itself.
+// DOM, the async work that follows (images, diagrams, the rest of a large file),
+// clicks inside it, and the scroll/find/highlight helpers the rest of the app
+// drives. The App only tells it what to show; it never touches the article DOM.
 
 /** In split view the preview trails typing by this long (longer for huge docs). */
 const LIVE_PREVIEW_DELAY_MS = 150
 const LIVE_PREVIEW_DELAY_LARGE_MS = 400
 const LARGE_DOC_CHARS = 200_000
-
-let mermaidSeq = 0
+/** Breathing room above a block we scroll to (heading, change, footnote). */
+const SCROLL_MARGIN = 24
+/** How long "follow the end" waits for the repaint it was asked before. */
+const STICK_TO_END_MS = 2000
+const FLASH_MS = 1200
+/** Most work one idle slice of a progressive render may do. */
+const SLICE_MS = 40
 
 /** What to render. */
 export interface ReaderDoc {
@@ -34,11 +51,11 @@ export interface ReaderView {
   blockRemoteImages: boolean
 }
 
-
-export interface FindResult {
-  /** 1-based index of the current match, 0 when there is none. */
-  index: number
-  total: number
+export interface RenderInfo {
+  /** Display-only repairs ("fixed for display"), as short sentences. */
+  fixes: string[]
+  /** Remote images held back by "Block remote images" (0 once loaded). */
+  blockedImages?: number
 }
 
 export interface ReaderCallbacks {
@@ -48,7 +65,7 @@ export interface ReaderCallbacks {
   /** A task checkbox was clicked. `line` is the 0-based source line of the task item. */
   onToggleTask(line: number, checked: boolean): void
   /** Called after each paint with notes about the document ("fixed for display" repairs). */
-  onRenderInfo?(info: { fixes: string[] }): void
+  onRenderInfo?(info: RenderInfo): void
   /** Scroll spy: the heading slug currently at the top of the reader. */
   onActiveHeading?(slug: string | null): void
 }
@@ -62,6 +79,29 @@ interface RenderKey {
   md: string
 }
 
+interface Progressive {
+  gen: number
+  article: HTMLElement
+  queue: RenderChunk[]
+  handle: number | null
+}
+
+type PendingScroll = { kind: 'end'; until: number } | { kind: 'line'; line: number } | null
+
+interface IdleDeadlineLike {
+  timeRemaining(): number
+}
+
+function onIdle(cb: (deadline: IdleDeadlineLike) => void): number {
+  if (typeof requestIdleCallback === 'function') return requestIdleCallback(cb, { timeout: 50 })
+  return window.setTimeout(() => cb({ timeRemaining: () => 16 }), 16)
+}
+
+function cancelIdle(handle: number): void {
+  if (typeof cancelIdleCallback === 'function') cancelIdleCallback(handle)
+  else clearTimeout(handle)
+}
+
 export class ReaderController {
   private el: HTMLElement | null = null
   private renderKey: RenderKey | null = null
@@ -73,16 +113,41 @@ export class ReaderController {
   private doc: ReaderDoc = { id: null, path: null, md: '' }
   private view: ReaderView = { mode: 'read', theme: 'light', blockRemoteImages: false }
 
+  private progressive: Progressive | null = null
+  private slugs: HeadingSlugs = { byLine: new Map(), used: new Set() }
+  private fixes: string[] = []
+  private blockedImages = 0
+  private allowRemoteFor: string | null = null
+  private anchorCache: { gen: number; height: number; width: number; anchors: Anchor[] } | null = null
+  private scrollSubs = new Set<() => void>()
+  private programmaticTop: number | null = null
+  private pendingScroll: PendingScroll = null
+  private spyFrame: number | null = null
+  private lastActive: string | null | undefined = undefined
+  private changeRanges: LineRange[] | null = null
+  private findState = new FindState()
+  private findSubs = new Set<(result: FindResult) => void>()
+  private diagrams: Promise<void> = Promise.resolve()
+
   constructor(private readonly cb: ReaderCallbacks) {}
 
   /** Attach to (or detach from, with null) the scrollable reader element. The next
    *  update() paints it (an empty element always counts as needing a paint). */
   attach(el: HTMLElement | null): void {
     if (el === this.el) return
-    if (this.el) this.el.removeEventListener('click', this.onClick)
+    if (this.el) {
+      this.el.removeEventListener('click', this.onClick)
+      this.el.removeEventListener('keydown', this.onKeyDown)
+      this.el.removeEventListener('scroll', this.onScrollEvent)
+    }
     this.el = el
     this.renderKey = null
-    if (el) el.addEventListener('click', this.onClick)
+    this.anchorCache = null
+    if (el) {
+      el.addEventListener('click', this.onClick)
+      el.addEventListener('keydown', this.onKeyDown)
+      el.addEventListener('scroll', this.onScrollEvent, { passive: true })
+    }
   }
 
   /** Show `doc` with `view`. Cheap when nothing changed; debounced while typing in split view. */
@@ -135,67 +200,24 @@ export class ReaderController {
       this.renderTimer = null
     }
     this.renderKey = { id, mode, theme, blockRemoteImages, md }
-    const myGen = ++this.renderGen
-    if (!id) {
-      el.innerHTML = ''
-      this.lastFile = null
-      return
-    }
-    const changedFile = this.lastFile !== id
-    const html = parseMarkdown(md)
-    const outline = computeOutline(md)
-    // Build the article inside an inert <template> so <img> tags in the document
-    // are never fetched (enhanceImages swaps them out); it's attached once ready.
-    const tpl = document.createElement('template')
-    tpl.innerHTML = '<div class="smd-article' + (changedFile ? ' smd-fade' : '') + '">' + html + '</div>'
-    const article = tpl.content.firstElementChild as HTMLElement | null
-    if (!article) return
-
-    article.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach((h, i) => {
-      if (outline[i]) (h as HTMLElement).id = outline[i].slug
-    })
-    this.enhanceImages(article, doc.path, myGen)
-
-    // Pull mermaid blocks out before highlighting so hljs/copy buttons skip them.
-    const mermaidJobs: { container: HTMLElement; source: string }[] = []
-    article.querySelectorAll<HTMLElement>('pre > code.language-mermaid').forEach((code) => {
-      const pre = code.parentElement
-      if (!pre) return
-      const container = document.createElement('div')
-      container.className = 'smd-mermaid'
-      pre.replaceWith(container)
-      mermaidJobs.push({ container, source: code.textContent || '' })
-    })
-
-    article.querySelectorAll<HTMLElement>('pre code[class*="language-"]').forEach((code) => {
-      try {
-        highlightCode(code)
-      } catch {
-        // unknown language — leave as plain text
-      }
-    })
-    article.querySelectorAll<HTMLElement>('pre').forEach((pre) => this.addCopyButton(pre))
-
-    el.replaceChildren(article)
-    if (mermaidJobs.length) void this.renderMermaid(mermaidJobs, myGen)
-    this.cb.onRenderInfo?.({ fixes: [] })
-
-    if (changedFile) {
-      el.scrollTop = 0
-      this.lastFile = id
-    }
+    this.paint(el, doc)
   }
 
   /** Scroll so the element with this id (heading slug, footnote) is at the top. */
   scrollToId(id: string): void {
     const el = this.el
     if (!el) return
+    let target: HTMLElement | null = null
     try {
-      const target = el.querySelector<HTMLElement>('#' + CSS.escape(id))
-      if (target) el.scrollTo({ top: Math.max(0, target.offsetTop - 16), behavior: 'smooth' })
+      target = el.querySelector<HTMLElement>('#' + CSS.escape(id))
     } catch {
-      // invalid selector — ignore
+      return // invalid selector
     }
+    if (!target) return
+    target.closest('details:not([open])')?.setAttribute('open', '')
+    el.scrollTo({ top: Math.max(0, this.offsetOf(target) - SCROLL_MARGIN), behavior: this.scrollBehavior() })
+    // Footnotes and back-links are small; show where we landed.
+    if (target.closest('.smd-footnotes') || target.matches('[data-footnote-ref]')) this.flash(target)
   }
 
   /** The rendered article, for export and copy. Null when nothing is shown. */
@@ -203,178 +225,423 @@ export class ReaderController {
     return this.el?.querySelector<HTMLElement>('.smd-article') ?? null
   }
 
-  // ---- synced scrolling (CONTRACT STUBS: lane R implements) ---------------------
+  // ---- synced scrolling ------------------------------------------------------------
 
   /** The 0-based source line at the top of the reader (fractional between blocks), or null. */
   getTopLine(): number | null {
-    return null
+    const el = this.el
+    if (!el) return null
+    return lineAtOffset(this.anchors(), el.scrollTop)
   }
 
   /** Scroll so source line `line` (fractional allowed) sits at the top of the reader. */
-  scrollToLine(_line: number): void {}
-
-  /** Subscribe to user scrolling of the reader. Returns an unsubscribe function. */
-  onScroll(_cb: () => void): () => void {
-    return () => {}
+  scrollToLine(line: number): void {
+    const top = offsetOfLine(this.anchors(), line)
+    if (top !== null) this.setScrollTop(top)
   }
 
-  // ---- following a file that grows (CONTRACT STUBS: lane R implements) ----------
+  /** Subscribe to user scrolling of the reader. Returns an unsubscribe function. */
+  onScroll(cb: () => void): () => void {
+    this.scrollSubs.add(cb)
+    return () => {
+      this.scrollSubs.delete(cb)
+    }
+  }
+
+  // ---- following a file that grows -------------------------------------------------
 
   /** True when the reader is scrolled to (or within a screen of) the end. */
   isNearEnd(): boolean {
-    return false
+    const el = this.el
+    if (!el) return false
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= el.clientHeight
   }
 
-  scrollToEnd(): void {}
+  scrollToEnd(): void {
+    const el = this.el
+    if (!el) return
+    // The growth that prompted this may paint after this call (debounce, KaTeX
+    // load, idle chunks), so keep following the end through the next repaint.
+    this.pendingScroll = { kind: 'end', until: Date.now() + STICK_TO_END_MS }
+    this.setScrollTop(el.scrollHeight)
+  }
 
-  // ---- "what changed" highlights (CONTRACT STUBS: lane R implements) ------------
+  // ---- "what changed" highlights ---------------------------------------------------
 
   /** Mark the blocks covering these source line ranges as changed (cleared on the next
    *  document switch or by clearChanges). Returns how many blocks were marked. */
-  showChanges(_ranges: LineRange[]): number {
-    return 0
+  showChanges(ranges: LineRange[]): number {
+    this.changeRanges = ranges.length ? [...ranges] : null
+    // Mark the new text, not the old one, when its repaint is merely debounced.
+    if (this.renderTimer && !this.preparing) this.update(this.doc, this.view, true)
+    const article = this.getArticle()
+    if (!article || !this.changeRanges) return 0
+    return markChanges(article, this.changeRanges)
   }
 
-  clearChanges(): void {}
+  clearChanges(): void {
+    this.changeRanges = null
+    const article = this.getArticle()
+    if (article) unmarkChanges(article)
+  }
 
   /** Scroll to the next marked block after the current position (wraps). False if none. */
   revealNextChange(): boolean {
-    return false
+    const el = this.el
+    const article = this.getArticle()
+    if (!el || !article) return false
+    // A block we revealed sits SCROLL_MARGIN * 2 below the top; look past it.
+    const target = nextChange(article, el, el.scrollTop + SCROLL_MARGIN * 2 + 2)
+    if (!target) return false
+    el.scrollTo({ top: Math.max(0, this.offsetOf(target) - SCROLL_MARGIN * 2), behavior: this.scrollBehavior() })
+    return true
   }
 
-  // ---- find in document (CONTRACT STUBS: lane R implements) ---------------------
+  // ---- find in document ----------------------------------------------------------
 
   /** Highlight every match of `query` (case-insensitive) and move to the next (or
    *  previous) one. An empty query clears the highlights. */
-  find(_query: string, _opts: { backwards?: boolean } = {}): FindResult {
-    return { index: 0, total: 0 }
+  find(query: string, opts: { backwards?: boolean } = {}): FindResult {
+    const article = this.getArticle()
+    const el = this.el
+    if (!article || !el || !query) {
+      this.clearFind()
+      return { index: 0, total: 0 }
+    }
+    if (query !== this.findState.query) {
+      const top = el.getBoundingClientRect().top
+      this.findState.search(article, query, (range) => range.getBoundingClientRect().top >= top)
+    } else {
+      this.findState.step(!!opts.backwards)
+    }
+    this.revealMatch()
+    return this.findState.result
   }
 
-  clearFind(): void {}
+  clearFind(): void {
+    this.findState.clear()
+  }
 
-  // ---- remote images (CONTRACT STUB: lane R implements) -------------------------
+  /** Find results changed on their own (the document repainted under an open find bar). */
+  onFindResult(cb: (result: FindResult) => void): () => void {
+    this.findSubs.add(cb)
+    return () => {
+      this.findSubs.delete(cb)
+    }
+  }
+
+  // ---- remote images -------------------------------------------------------------
 
   /** Load the remote images that `blockRemoteImages` held back, for the current document only. */
-  loadBlockedImages(): void {}
+  loadBlockedImages(): void {
+    this.allowRemoteFor = this.doc.id
+    const article = this.getArticle()
+    if (article) loadBlocked(article)
+    this.blockedImages = 0
+    this.reportInfo()
+  }
 
   dispose(): void {
     if (this.renderTimer) clearTimeout(this.renderTimer)
     this.renderTimer = null
+    this.cancelProgressive()
+    if (this.spyFrame !== null) cancelAnimationFrame(this.spyFrame)
+    this.spyFrame = null
+    this.clearFind()
     this.attach(null)
   }
 
-  // ---- internals ------------------------------------------------------------------
+  // ---- painting --------------------------------------------------------------------
+
+  private paint(el: HTMLElement, doc: ReaderDoc): void {
+    const changedFile = this.lastFile !== doc.id
+    const keepLine = changedFile ? null : this.getTopLine()
+    const gen = ++this.renderGen
+    this.cancelProgressive()
+    this.anchorCache = null
+    if (!doc.id) {
+      el.innerHTML = ''
+      this.lastFile = null
+      return
+    }
+    if (changedFile) this.resetForNewDocument()
+    this.slugs = headingSlugs(doc.md)
+    this.fixes = []
+    this.blockedImages = 0
+
+    const article = document.createElement('div')
+    article.className = 'smd-article' + (changedFile ? ' smd-fade' : '')
+    const chunks = isLargeDocument(doc.md) ? planProgressive(doc.md) : [{ src: doc.md, options: {} }]
+    this.renderChunk(article, chunks[0], gen)
+    el.replaceChildren(article)
+
+    if (changedFile) {
+      el.scrollTop = 0
+      this.lastFile = doc.id
+    } else if (keepLine !== null) {
+      // Keep the reading position across the repaint (unless following the end).
+      if (this.pendingScroll?.kind !== 'end') this.pendingScroll = { kind: 'line', line: keepLine }
+    }
+    if (chunks.length > 1) this.startProgressive(article, chunks.slice(1), gen)
+    this.afterChunks(article, chunks.length === 1)
+  }
+
+  private resetForNewDocument(): void {
+    this.changeRanges = null
+    this.pendingScroll = null
+    this.lastActive = undefined
+    if (this.allowRemoteFor !== this.doc.id) this.allowRemoteFor = null
+  }
+
+  /** Render one chunk of Markdown and append it to `article`. */
+  private renderChunk(article: HTMLElement, chunk: RenderChunk, gen: number): void {
+    const { html, fixes } = renderMarkdown(chunk.src, chunk.options)
+    const doc = this.doc
+    // Build inside an inert <template> so <img> tags in the document are never
+    // fetched (enhanceImages swaps them out); it's attached once ready.
+    const tpl = document.createElement('template')
+    tpl.innerHTML = html
+    const frag = tpl.content
+    assignHeadingIds(frag, this.slugs)
+    this.blockedImages += enhanceImages(frag, {
+      docPath: doc.path,
+      blockRemote: this.view.blockRemoteImages && this.allowRemoteFor !== doc.id,
+      readImage: (docPath, src) => this.cb.readImage(docPath, src),
+      isStale: () => this.renderGen !== gen
+    })
+    // Pull mermaid blocks out before decorating so they get no copy button.
+    const jobs = extractDiagrams(frag)
+    decorateCodeBlocks(frag)
+    article.appendChild(frag)
+    for (const fix of fixes) if (!this.fixes.includes(fix)) this.fixes.push(fix)
+    // One diagram batch at a time: mermaid's renderer is global and not re-entrant.
+    if (jobs.length) this.diagrams = this.diagrams.then(() => this.drawDiagrams(jobs, gen)).catch(() => undefined)
+  }
+
+  /** Bring marks, find, scroll position and status up to date after chunks land. */
+  private afterChunks(article: HTMLElement, complete: boolean): void {
+    this.anchorCache = null
+    if (this.changeRanges) markChanges(article, this.changeRanges)
+    if (this.findState.query) {
+      this.findState.refresh(article)
+      const result = this.findState.result
+      this.findSubs.forEach((cb) => cb(result))
+    }
+    this.applyPendingScroll(complete)
+    this.reportInfo()
+    this.scheduleSpy()
+  }
+
+  private startProgressive(article: HTMLElement, queue: RenderChunk[], gen: number): void {
+    const job: Progressive = { gen, article, queue, handle: null }
+    const step = (deadline: IdleDeadlineLike): void => {
+      if (this.progressive !== job) return
+      // At least one chunk per slice; more while there's idle time, but never long
+      // enough to make a click or keystroke wait.
+      const started = performance.now()
+      do {
+        const chunk = job.queue.shift()
+        if (chunk) this.renderChunk(article, chunk, gen)
+      } while (job.queue.length && deadline.timeRemaining() > 20 && performance.now() - started < SLICE_MS)
+      const done = !job.queue.length
+      if (done) this.progressive = null
+      else job.handle = onIdle(step)
+      this.afterChunks(article, done)
+    }
+    this.progressive = job
+    job.handle = onIdle(step)
+  }
+
+  private cancelProgressive(): void {
+    if (this.progressive?.handle != null) cancelIdle(this.progressive.handle)
+    this.progressive = null
+  }
+
+  private async drawDiagrams(jobs: MermaidJob[], gen: number): Promise<void> {
+    const fixed = await renderMermaid(jobs, this.view.theme, () => this.renderGen !== gen)
+    if (this.renderGen !== gen) return
+    this.anchorCache = null
+    if (fixed && !this.fixes.includes(FIX_DIAGRAM)) {
+      this.fixes.push(FIX_DIAGRAM)
+      this.reportInfo()
+    }
+  }
+
+  private reportInfo(): void {
+    this.cb.onRenderInfo?.({ fixes: [...this.fixes], blockedImages: this.blockedImages })
+  }
+
+  // ---- scrolling -------------------------------------------------------------------
+
+  private anchors(): Anchor[] {
+    const el = this.el
+    const article = this.getArticle()
+    if (!el || !article) return []
+    const cache = this.anchorCache
+    // Layout only moves when the content height or width changes (images, diagrams,
+    // window resizes), so the measured anchors stay valid until then.
+    if (cache && cache.gen === this.renderGen && cache.height === el.scrollHeight && cache.width === el.clientWidth) {
+      return cache.anchors
+    }
+    const anchors = measureAnchors(article, el)
+    this.anchorCache = { gen: this.renderGen, height: el.scrollHeight, width: el.clientWidth, anchors }
+    return anchors
+  }
+
+  /** Scroll without notifying onScroll subscribers (no feedback into synced scrolling). */
+  private setScrollTop(top: number): void {
+    const el = this.el
+    if (!el) return
+    const before = el.scrollTop
+    el.scrollTop = Math.max(0, top)
+    if (el.scrollTop !== before) this.programmaticTop = el.scrollTop
+  }
+
+  private applyPendingScroll(complete: boolean): void {
+    const el = this.el
+    const pending = this.pendingScroll
+    if (!el || !pending) return
+    if (pending.kind === 'end') {
+      if (Date.now() > pending.until) this.pendingScroll = null
+      else this.setScrollTop(el.scrollHeight)
+      return
+    }
+    const anchors = this.anchors()
+    const last = anchors[anchors.length - 1]
+    // A line in a chunk that hasn't rendered yet waits for it.
+    if (!complete && (!last || last.end <= pending.line)) return
+    this.pendingScroll = null
+    this.scrollToLine(pending.line)
+  }
+
+  private onScrollEvent = (): void => {
+    const el = this.el
+    if (!el) return
+    this.scheduleSpy()
+    if (this.programmaticTop !== null && Math.abs(el.scrollTop - this.programmaticTop) <= 1) {
+      this.programmaticTop = null
+      return
+    }
+    this.programmaticTop = null
+    // The user took over: stop pinning to the end or restoring a line.
+    if (this.pendingScroll && !this.isNearEnd()) this.pendingScroll = null
+    this.scrollSubs.forEach((cb) => cb())
+  }
+
+  private scheduleSpy(): void {
+    if (!this.cb.onActiveHeading || this.spyFrame !== null) return
+    this.spyFrame = requestAnimationFrame(() => {
+      this.spyFrame = null
+      const el = this.el
+      const article = this.getArticle()
+      const slug = el && article ? activeHeading(article, el) : null
+      if (slug === this.lastActive) return
+      this.lastActive = slug
+      this.cb.onActiveHeading?.(slug)
+    })
+  }
+
+  private offsetOf(target: HTMLElement): number {
+    const el = this.el
+    if (!el) return 0
+    return target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
+  }
+
+  private scrollBehavior(): ScrollBehavior {
+    const reduce =
+      !!this.el?.closest('.smd-reduce-motion') || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    return reduce ? 'auto' : 'smooth'
+  }
+
+  private flash(target: HTMLElement): void {
+    target.classList.remove('smd-flash')
+    // Restart the animation when the same element is flashed twice in a row.
+    void target.offsetWidth
+    target.classList.add('smd-flash')
+    setTimeout(() => target.classList.remove('smd-flash'), FLASH_MS)
+  }
+
+  /** Bring the current find match into view (opening a folded callout around it). */
+  private revealMatch(): void {
+    const el = this.el
+    const range = this.findState.currentRange
+    if (!el || !range) return
+    const holder = range.startContainer.parentElement
+    let closed = holder?.closest('details:not([open])')
+    while (closed) {
+      closed.setAttribute('open', '')
+      closed = closed.parentElement?.closest('details:not([open])') ?? null
+    }
+    const rect = range.getBoundingClientRect()
+    const view = el.getBoundingClientRect()
+    if (rect.top >= view.top + 56 && rect.bottom <= view.bottom - 32) return
+    const top = el.scrollTop + rect.top - view.top - el.clientHeight / 3
+    el.scrollTo({ top: Math.max(0, top), behavior: this.scrollBehavior() })
+  }
+
+  // ---- input -----------------------------------------------------------------------
 
   private onClick = (e: MouseEvent): void => {
-    const anchor = (e.target as HTMLElement).closest('a')
+    const target = e.target
+    if (!(target instanceof Element)) return
+    if (target instanceof HTMLInputElement && target.type === 'checkbox') {
+      const line = target.getAttribute('data-task-line')
+      if (line !== null && !target.disabled) this.cb.onToggleTask(Number(line), target.checked)
+      return
+    }
+    if (isLoadImagesControl(target)) {
+      e.preventDefault()
+      this.loadBlockedImages()
+      return
+    }
+    const anchor = target.closest('a')
     if (!anchor) return
     const href = anchor.getAttribute('href') || ''
     if (!href) return
     e.preventDefault()
     if (href.startsWith('#')) {
-      this.scrollToId(href.slice(1))
+      // Footnote ids keep their percent-encoding; heading links may be encoded or not.
+      const id = href.slice(1)
+      const article = this.getArticle()
+      const exists = !!article && Array.from(article.querySelectorAll('[id]')).some((el) => el.id === id)
+      this.scrollToId(exists ? id : decodeURIComponentSafe(id))
       return
     }
     this.cb.onLink(href)
   }
 
-  private enhanceImages(article: HTMLElement, docPath: string | null, myGen: number): void {
-    article.querySelectorAll('img').forEach((img) => {
-      const src = img.getAttribute('src') || ''
-      const alt = img.getAttribute('alt') || ''
-      const remote = /^(https?:|data:)/i.test(src)
-      const figure = document.createElement('figure')
-      figure.className = 'smd-img'
-
-      if (remote) {
-        const real = document.createElement('img')
-        real.src = src
-        real.alt = alt
-        figure.appendChild(real)
-      } else {
-        const placeholder = document.createElement('div')
-        placeholder.className = 'smd-imgph'
-        const span = document.createElement('span')
-        span.textContent = alt || src || 'image'
-        placeholder.appendChild(span)
-        figure.appendChild(placeholder)
-      }
-      if (alt) {
-        const caption = document.createElement('figcaption')
-        caption.textContent = alt
-        figure.appendChild(caption)
-      }
-      img.replaceWith(figure)
-
-      if (!remote && docPath) {
-        this.cb
-          .readImage(docPath, src)
-          .then((dataUrl) => {
-            if (this.renderGen !== myGen || !figure.isConnected || !dataUrl) return
-            const real = document.createElement('img')
-            real.src = dataUrl
-            real.alt = alt
-            const placeholder = figure.querySelector('.smd-imgph')
-            if (placeholder) placeholder.replaceWith(real)
-          })
-          .catch(() => {})
-      }
-    })
-  }
-
-  private addCopyButton(pre: HTMLElement): void {
-    const button = document.createElement('button')
-    button.className = 'smd-copy'
-    button.type = 'button'
-    button.textContent = 'Copy'
-    button.addEventListener('click', () => {
-      const code = pre.querySelector('code')
-      const text = code ? code.innerText : ''
-      navigator.clipboard?.writeText(text).catch(() => {})
-      button.textContent = 'Copied'
-      setTimeout(() => {
-        button.textContent = 'Copy'
-      }, 1200)
-    })
-    pre.appendChild(button)
-  }
-
-  private async renderMermaid(
-    jobs: { container: HTMLElement; source: string }[],
-    myGen: number
-  ): Promise<void> {
-    let mermaid
-    try {
-      mermaid = (await import('mermaid')).default
-    } catch {
-      return // mermaid chunk failed to load; leave placeholders empty
-    }
-    if (this.renderGen !== myGen) return
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: 'strict',
-      theme: this.view.theme === 'dark' ? 'dark' : 'default',
-      fontFamily: "'Helvetica Neue',Helvetica,Arial,sans-serif"
-    })
-    for (const job of jobs) {
-      if (this.renderGen !== myGen) return
-      if (!job.container.isConnected) continue
-      try {
-        const { svg } = await mermaid.render('smd-mmd-' + ++mermaidSeq, job.source)
-        if (this.renderGen !== myGen || !job.container.isConnected) return
-        job.container.innerHTML = svg
-      } catch {
-        // Invalid diagram — fall back to showing the source with a small note.
-        job.container.className = 'smd-mermaid smd-mermaid-error'
-        const note = document.createElement('div')
-        note.className = 'smd-mermaid-note'
-        note.textContent = 'Could not render this diagram'
-        const pre = document.createElement('pre')
-        const code = document.createElement('code')
-        code.textContent = job.source
-        pre.appendChild(code)
-        job.container.replaceChildren(note, pre)
-      }
+  private onKeyDown = (e: KeyboardEvent): void => {
+    const target = e.target
+    if (!(target instanceof Element) || (e.key !== 'Enter' && e.key !== ' ')) return
+    if (target.getAttribute('role') === 'button' && isLoadImagesControl(target)) {
+      e.preventDefault()
+      this.loadBlockedImages()
     }
   }
+}
+
+function decodeURIComponentSafe(text: string): string {
+  try {
+    return decodeURIComponent(text)
+  } catch {
+    return text
+  }
+}
+
+/** Swap ```mermaid code blocks for empty diagram containers (drawn asynchronously). */
+function extractDiagrams(root: ParentNode): MermaidJob[] {
+  const jobs: MermaidJob[] = []
+  root.querySelectorAll<HTMLElement>('pre > code.language-mermaid').forEach((code) => {
+    const pre = code.parentElement
+    if (!pre) return
+    const container = document.createElement('div')
+    container.className = 'smd-mermaid'
+    for (const name of ['data-line', 'data-line-end']) {
+      const value = pre.getAttribute(name)
+      if (value !== null) container.setAttribute(name, value)
+    }
+    pre.replaceWith(container)
+    jobs.push({ container, source: code.textContent || '' })
+  })
+  return jobs
 }
