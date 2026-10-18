@@ -2,8 +2,8 @@ import type { KeyboardEvent, ReactNode } from 'react'
 import type { Platform, ReadingFont, ThemeName } from '@shared/types'
 import type { SettingsSection } from '@/app/types'
 import { ACCENTS, UI_SCALE } from '@/app/appearance'
-import { COMMANDS, EDITOR_SHORTCUTS, GROUP_ORDER } from '@/lib/commands'
-import { formatShortcut } from '@/lib/logic/platform'
+import { COMMANDS, EDITOR_SHORTCUTS, GROUP_ORDER, commandLabel, type CommandId } from '@/lib/commands'
+import { formatShortcut, revealLabel, trashName } from '@/lib/logic/platform'
 import {
   AppMark,
   CheckIcon,
@@ -41,6 +41,8 @@ export interface SettingsDialogProps {
   section: SettingsSection
   values: SettingsValues
   platform: Platform
+  /** Commands that are wired up; the Shortcuts sheet lists only those. */
+  hasCommand: (id: CommandId) => boolean
   onSection: (s: SettingsSection) => void
   onChange: (patch: Partial<SettingsValues>) => void
   onOpenLink: (url: string) => void
@@ -210,18 +212,19 @@ function Keys({ shortcut, platform }: { shortcut: string; platform: Platform }) 
   return <span className="smd-kbd">{formatShortcut(shortcut, platform)}</span>
 }
 
-function Shortcuts({ platform }: SettingsDialogProps) {
+function Shortcuts({ platform, hasCommand }: SettingsDialogProps) {
+  const words = { trash: trashName(platform), reveal: revealLabel(platform) }
   return (
     <>
       {GROUP_ORDER.map((group) => {
-        const rows = COMMANDS.filter((c) => c.group === group && c.shortcuts?.length)
+        const rows = COMMANDS.filter((c) => c.group === group && c.shortcuts?.length && hasCommand(c.id))
         if (!rows.length) return null
         return (
           <section key={group} className="smd-shortcut-group">
             <h3>{group}</h3>
             {rows.map((c) => (
               <div key={c.id} className="smd-shortcut-row">
-                <span>{c.label}</span>
+                <span>{commandLabel(c, words)}</span>
                 <span className="smd-shortcut-keys">
                   {c.shortcuts?.map((s) => (
                     <Keys key={s} shortcut={s} platform={platform} />

@@ -9,7 +9,7 @@ import type { PaletteCommand, PaletteFolder } from '@/components/CommandPalette'
 import type { SettingsValues } from '@/components/SettingsDialog'
 import ReadingPopover from '@/components/ReadingPopover'
 import RecoveryPrompt from '@/components/RecoveryPrompt'
-import Toast from '@/components/Toast'
+import Toast, { ToastAnnouncer } from '@/components/Toast'
 import DropOverlay from '@/components/DropOverlay'
 import { CloseWindowDialog, ConfirmDialog, NameDialog, UnsavedDialog } from '@/components/Prompts'
 import type { AppHost } from './host'
@@ -42,6 +42,7 @@ interface Props {
   docs: DocumentActions
   files: FileActions
   runCommand: (id: CommandId) => void
+  hasCommand: (id: CommandId) => boolean
   onRestore: () => void
   onDiscard: () => void
   onCloseWindow: (save: boolean) => void
@@ -180,6 +181,7 @@ export default function AppOverlays(p: Props) {
             section={s.settings}
             values={settingsValues(s)}
             platform={p.platform}
+            hasCommand={p.hasCommand}
             onSection={(settings) => host.update({ settings })}
             onChange={(patch) => host.update(clean(patch))}
             onOpenLink={(url) => void window.api.openExternal(url).catch(() => host.toast("Couldn't open that link."))}
@@ -191,6 +193,7 @@ export default function AppOverlays(p: Props) {
       {s.recovery && !s.dialog && (
         <RecoveryPrompt entries={s.recovery} onRestore={p.onRestore} onDiscard={p.onDiscard} />
       )}
+      <ToastAnnouncer toast={s.toast} />
       {s.toast && (
         <Toast
           toast={s.toast}

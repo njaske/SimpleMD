@@ -1,6 +1,6 @@
 // Launch: load settings, restore the last session (workspace, loose files, tabs),
 // open files passed by the shell, then offer crash recovery.
-import type { OpenedFile, Settings } from '@shared/types'
+import type { OpenedFile, RecoveryEntry, Settings } from '@shared/types'
 import type { AppHost, Patch } from './host'
 import type { FileActions } from './files'
 import type { RecoveryKeeper } from './recovery'
@@ -60,7 +60,8 @@ export async function bootstrap({ host, files, recovery, onSettings }: BootDeps)
   } catch {
     host.update({ ready: true })
     host.toast("Couldn't load your settings, so SimpleMD started with the defaults.")
-    recovery.enable()
+    // Recovery doesn't depend on settings: still offer what the last session left.
+    await offerRecovery(host, recovery, window.api.loadRecovery().catch(() => []))
     return
   }
   host.update(settingsPatch(s), () => onSettings(s))
@@ -89,7 +90,13 @@ export async function bootstrap({ host, files, recovery, onSettings }: BootDeps)
   const launched = await launchFiles
   if (launched) files.openResult(launched)
 
-  const entries = await recovered
+  await offerRecovery(host, recovery, recovered)
+}
+
+/** Show the recovery prompt when the last session left unsaved buffers; recovery
+ *  writes start only once it is answered, so those buffers survive until then. */
+async function offerRecovery(host: AppHost, recovery: RecoveryKeeper, loaded: Promise<RecoveryEntry[]>): Promise<void> {
+  const entries = await loaded
   if (entries.length) host.update({ recovery: entries })
   else recovery.enable()
 }

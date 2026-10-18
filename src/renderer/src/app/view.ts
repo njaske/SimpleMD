@@ -31,12 +31,12 @@ type TreeInput = Pick<
   'tree' | 'looseFiles' | 'expanded' | 'pinned' | 'activeId' | 'newPaths' | 'root' | 'emptyFolders'
 >
 
-function folderLabel(dir: string, root: string | null): string {
+export function folderLabel(dir: string, root: string | null): string {
   if (!root || !isWithin(dir, root) || dir === root) return baseName(dir)
   return dir
     .slice(root.length)
-    .replace(/^[\/]+/, '')
-    .split(/[\/]/)
+    .replace(/^[\\/]+/, '')
+    .split(/[\\/]/)
     .join('  /  ')
 }
 

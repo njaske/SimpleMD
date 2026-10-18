@@ -277,21 +277,33 @@ export interface ReconcileResult {
   added: string[]
 }
 
-/** Fold a fresh scan into the open documents without ever clobbering unsaved edits:
- *  clean files reload, dirty ones that diverged on disk get flagged as conflicts, and
- *  vanished clean files close. */
-export function reconcileScan(
-  s: Pick<AppState, 'tree' | 'contents' | 'saved' | 'externalChanges' | 'openTabs' | 'activeId' | 'looseFiles'>,
-  scan: FolderScan
-): ReconcileResult {
+export interface MergedDocs {
+  contents: Record<string, string>
+  saved: Record<string, string>
+  externalChanges: Record<string, boolean>
+  /** Paths whose text changed on disk while they were clean (reloaded). */
+  reloaded: string[]
+  /** Paths whose unsaved edits were kept although the disk text differs. */
+  conflicts: string[]
+}
+
+/** Disk text from a scan folded into the buffers: clean files take the disk text,
+ *  dirty ones keep their edits (flagged as a conflict when the disk diverged). */
+export function mergeScanDocs(
+  s: Pick<AppState, 'contents' | 'saved' | 'externalChanges'>,
+  scan: Pick<FolderScan, 'contents'>
+): MergedDocs {
   const contents = { ...s.contents }
   const saved = { ...s.saved }
   const externalChanges = { ...s.externalChanges }
   const reloaded: string[] = []
+  const conflicts: string[] = []
   for (const [id, diskText] of Object.entries(scan.contents)) {
     if (isDirtyIn(contents, saved, id)) {
-      // Don't clobber unsaved edits; flag a conflict if disk diverged.
-      if (diskText !== saved[id]) externalChanges[id] = true
+      if (diskText !== saved[id]) {
+        externalChanges[id] = true
+        conflicts.push(id)
+      }
       continue
     }
     if (contents[id] !== undefined && contents[id] !== diskText) reloaded.push(id)
@@ -299,6 +311,23 @@ export function reconcileScan(
     saved[id] = diskText
     delete externalChanges[id]
   }
+  return { contents, saved, externalChanges, reloaded, conflicts }
+}
+
+/** Tabs that must survive replacing the tab strip (opening a folder): untitled
+ *  documents and anything with unsaved edits, so no edit ever disappears from view. */
+export function tabsToCarry(s: Pick<AppState, 'openTabs' | 'contents' | 'saved'>): string[] {
+  return s.openTabs.filter((t) => isUntitled(t) || isDirtyIn(s.contents, s.saved, t))
+}
+
+/** Fold a fresh scan into the open documents without ever clobbering unsaved edits:
+ *  clean files reload, dirty ones that diverged on disk get flagged as conflicts, and
+ *  vanished clean files close. */
+export function reconcileScan(
+  s: Pick<AppState, 'tree' | 'contents' | 'saved' | 'externalChanges' | 'openTabs' | 'activeId' | 'looseFiles'>,
+  scan: FolderScan
+): ReconcileResult {
+  const { contents, saved, externalChanges, reloaded } = mergeScanDocs(s, scan)
 
   // Workspace files that vanished from disk go away (unless edited or loose).
   const looseSet = new Set(s.looseFiles.map((f) => f.path))

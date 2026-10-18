@@ -7,6 +7,16 @@ import { TEXT_SIZE, clampTextSize, resolveTheme } from './appearance'
 
 export type ViewActions = ReturnType<typeof createViewActions>
 
+const SIDEBAR_FOCUS = ['.smd-tree [tabindex="0"]', '.smd-side-switch [aria-checked="true"]', 'button']
+
+function focusSidebar(): void {
+  const side = document.querySelector<HTMLElement>('.smd-sidebar')
+  for (const sel of SIDEBAR_FOCUS) {
+    const el = side?.querySelector<HTMLElement>(sel)
+    if (el) return el.focus()
+  }
+}
+
 export function createViewActions(host: AppHost) {
   const setView = (viewMode: ViewMode): void =>
     host.update({ viewMode }, () => {
@@ -20,7 +30,13 @@ export function createViewActions(host: AppHost) {
       s.compact ? { sidebarPeek: !s.sidebarPeek, focusMode: false } : { sidebarOpen: !s.sidebarOpen, focusMode: false }
     )
 
-  const showSidebar = (): void => host.update((s) => (s.compact ? { sidebarPeek: true } : { sidebarOpen: true }))
+  /** The button that showed the sidebar unmounts, so keyboard focus moves into the
+   *  sidebar instead of falling back to the page. */
+  const showSidebar = (): void =>
+    host.update(
+      (s) => (s.compact ? { sidebarPeek: true } : { sidebarOpen: true }),
+      focusSidebar
+    )
 
   const setActivity = (activity: Activity): void =>
     host.update((s) => ({ activity, sidebarOpen: true, sidebarPeek: s.compact }))

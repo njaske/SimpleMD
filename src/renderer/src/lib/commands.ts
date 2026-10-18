@@ -68,6 +68,7 @@ export type EditorRule = 'app' | 'editor'
 
 export interface CommandSpec {
   id: CommandId
+  /** May hold {trash} / {reveal}; show it through commandLabel. */
   label: string
   group: CommandGroup
   /** First one is shown in the palette and the Shortcuts sheet. */
@@ -167,9 +168,9 @@ export const COMMANDS: readonly CommandSpec[] = [
   { id: 'duplicate', label: 'Duplicate', group: 'Files', keywords: 'copy' },
   { id: 'newFileInFolder', label: 'New file in folder', group: 'Files' },
   { id: 'newFolder', label: 'New folder', group: 'Files' },
-  { id: 'revealInFolder', label: 'Reveal in folder', group: 'Files', keywords: 'explorer finder files show' },
+  { id: 'revealInFolder', label: '{reveal}', group: 'Files', keywords: 'reveal explorer finder files show folder' },
   { id: 'copyPath', label: 'Copy path', group: 'Files' },
-  { id: 'moveToTrash', label: 'Move to Trash', group: 'Files', keywords: 'delete remove recycle bin' },
+  { id: 'moveToTrash', label: 'Move to {trash}', group: 'Files', keywords: 'delete remove trash recycle bin' },
 
   { id: 'exportPdf', label: 'Export PDF…', group: 'Export', shortcuts: ['Mod+Shift+E'] },
   { id: 'exportHtml', label: 'Export HTML…', group: 'Export', keywords: 'web page standalone' },
@@ -235,14 +236,28 @@ export function appHandles(spec: CommandSpec, ctx: KeyContext): boolean {
 
 export type ShortcutMatcher = (e: KeyLike, shortcut: Shortcut, platform: Platform) => boolean
 
-/** The physical letter/digit behind a key event, so Option (macOS) and Shift
- *  variants ("ß" for ⌥S, "*" for Shift+8) still match letter shortcuts. */
-export function keyFromCode(e: KeyLike): KeyLike | null {
-  const code = e.code ?? ''
-  const m = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(code)
+const LATIN_OR_DIGIT = /^[a-z0-9]$/i
+
+/** The physical letter/digit behind a key event, so shortcuts still work when the
+ *  key types something else: Cyrillic or Greek layouts ("з" is KeyP), macOS Option
+ *  glyphs ("ß" for ⌥S) and Shift symbols ("*" for Shift+8). A real Latin letter or
+ *  digit always wins (AZERTY Ctrl+Z is code KeyW and must stay Undo), and Ctrl+Alt on
+ *  Windows/Linux is AltGr, which types characters ("ś") rather than shortcuts. */
+export function keyFromCode(e: KeyLike, platform: Platform): KeyLike | null {
+  if (LATIN_OR_DIGIT.test(e.key)) return null
+  if (platform !== 'darwin' && e.ctrlKey && e.altKey) return null
+  const m = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(e.code ?? '')
   if (!m) return null
-  const key = (m[1] ?? m[2]).toLowerCase()
-  return key === e.key.toLowerCase() ? null : { ...e, key }
+  // Copied field by field: a DOM KeyboardEvent's modifiers are prototype getters,
+  // so spreading the event would drop them.
+  return {
+    key: (m[1] ?? m[2]).toLowerCase(),
+    code: e.code,
+    ctrlKey: e.ctrlKey,
+    metaKey: e.metaKey,
+    altKey: e.altKey,
+    shiftKey: e.shiftKey
+  }
 }
 
 /** A literal Ctrl shortcut ("Ctrl+Tab") means the Control key on every platform. */
@@ -258,15 +273,20 @@ function matchesLiteralCtrl(e: KeyLike, shortcut: Shortcut): boolean {
   )
 }
 
+function matchesDirect(e: KeyLike, shortcut: Shortcut, platform: Platform, match: ShortcutMatcher): boolean {
+  return shortcut.startsWith('Ctrl+') ? matchesLiteralCtrl(e, shortcut) : match(e, shortcut, platform)
+}
+
+/** `shortcut` matches the key as typed, or else its physical key. */
 export function matchesKey(e: KeyLike, shortcut: Shortcut, platform: Platform, match: ShortcutMatcher): boolean {
-  if (shortcut.startsWith('Ctrl+')) return matchesLiteralCtrl(e, shortcut)
-  if (match(e, shortcut, platform)) return true
-  const physical = keyFromCode(e)
-  return !!physical && match(physical, shortcut, platform)
+  if (matchesDirect(e, shortcut, platform, match)) return true
+  const physical = keyFromCode(e, platform)
+  return !!physical && matchesDirect(physical, shortcut, platform, match)
 }
 
 /** The command a key press triggers, or null. `available` says which ids have a
- *  handler and are enabled right now. */
+ *  handler and are enabled right now. Every command gets a chance to match the key
+ *  as typed before any matches by physical key. */
 export function commandForKey(
   e: KeyLike,
   ctx: KeyContext,
@@ -275,13 +295,34 @@ export function commandForKey(
   match: ShortcutMatcher,
   specs: readonly CommandSpec[] = COMMANDS
 ): CommandSpec | null {
-  for (const spec of specs) {
-    if (!spec.shortcuts || !available(spec.id) || !appHandles(spec, ctx)) continue
-    const keys =
-      ctx.inEditor && spec.editorOwns ? spec.shortcuts.filter((s) => !spec.editorOwns?.includes(s)) : spec.shortcuts
-    if (keys.some((s) => matchesKey(e, s, platform, match))) return spec
-  }
-  return null
+  const candidates = specs
+    .filter((spec) => spec.shortcuts && available(spec.id) && appHandles(spec, ctx))
+    .map((spec) => ({
+      spec,
+      keys:
+        ctx.inEditor && spec.editorOwns
+          ? (spec.shortcuts ?? []).filter((s) => !spec.editorOwns?.includes(s))
+          : (spec.shortcuts ?? [])
+    }))
+  const find = (ev: KeyLike): CommandSpec | null =>
+    candidates.find((c) => c.keys.some((s) => matchesDirect(ev, s, platform, match)))?.spec ?? null
+  const direct = find(e)
+  if (direct) return direct
+  const physical = keyFromCode(e, platform)
+  return physical ? find(physical) : null
+}
+
+/** The platform's own words, filled into labels like "Move to {trash}". */
+export interface PlatformWords {
+  /** "Recycle Bin" or "Trash". */
+  trash: string
+  /** "Reveal in File Explorer", "Show in Finder", ... */
+  reveal: string
+}
+
+/** The label to show for `spec`, in the platform's own words. */
+export function commandLabel(spec: CommandSpec, words: PlatformWords): string {
+  return spec.label.replace('{trash}', words.trash).replace('{reveal}', words.reveal)
 }
 
 /** Palette order for an empty query: recently used first (most recent first), then

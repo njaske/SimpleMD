@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import {
   COMMANDS,
   appHandles,
+  commandLabel,
   commandForKey,
   commandSpec,
   keyFromCode,
@@ -49,8 +50,18 @@ const field = { inEditor: false, inTextField: true }
 describe('command registry', () => {
   it('has unique ids and labels in sentence case', () => {
     const ids = COMMANDS.map((c) => c.id)
+    const words = { trash: 'Recycle Bin', reveal: 'Reveal in File Explorer' }
     assert.equal(new Set(ids).size, ids.length)
-    for (const c of COMMANDS) assert.match(c.label, /^[A-Z][^A-Z]*|^Theme: /, c.label)
+    for (const c of COMMANDS) assert.match(commandLabel(c, words), /^[A-Z][^A-Z]*|^Theme: |^Reveal in File|Bin$/, c.id)
+  })
+
+  it('fills in the platform words for Trash and Reveal', () => {
+    const win = { trash: 'Recycle Bin', reveal: 'Reveal in File Explorer' }
+    const mac = { trash: 'Trash', reveal: 'Show in Finder' }
+    assert.equal(commandLabel(commandSpec('moveToTrash'), win), 'Move to Recycle Bin')
+    assert.equal(commandLabel(commandSpec('moveToTrash'), mac), 'Move to Trash')
+    assert.equal(commandLabel(commandSpec('revealInFolder'), mac), 'Show in Finder')
+    assert.equal(commandLabel(commandSpec('save'), mac), 'Save')
   })
 
   it('never binds the same shortcut to two commands', () => {
@@ -121,9 +132,32 @@ describe('commandForKey', () => {
 
 describe('key helpers', () => {
   it('reads the physical letter or digit from the key code', () => {
-    assert.equal(keyFromCode(key('*', { code: 'Digit8' }))?.key, '8')
-    assert.equal(keyFromCode(key('s', { code: 'KeyS' })), null)
-    assert.equal(keyFromCode(key('/', { code: 'Slash' })), null)
+    assert.equal(keyFromCode(key('*', { code: 'Digit8' }), 'win32')?.key, '8')
+    assert.equal(keyFromCode(key('s', { code: 'KeyS' }), 'win32'), null)
+    assert.equal(keyFromCode(key('/', { code: 'Slash' }), 'win32'), null)
+  })
+
+  it('never lets the physical key override a real Latin letter (AZERTY Ctrl+Z stays Undo)', () => {
+    // Arrange: AZERTY puts Z where QWERTY has W.
+    const azertyUndo = key('z', { ctrl: true, code: 'KeyW' })
+
+    // Act
+    const hit = commandForKey(azertyUndo, outside, 'win32', all, match)
+
+    // Assert
+    assert.equal(keyFromCode(azertyUndo, 'win32'), null)
+    assert.equal(hit, null)
+  })
+
+  it('leaves AltGr characters (Ctrl+Alt on Windows) to typing', () => {
+    const polishS = key('ś', { ctrl: true, alt: true, code: 'KeyS' })
+    assert.equal(keyFromCode(polishS, 'win32'), null)
+    assert.equal(commandForKey(polishS, editor, 'win32', all, match), null)
+  })
+
+  it('runs shortcuts on Cyrillic and Greek layouts by physical key', () => {
+    assert.equal(commandForKey(key('з', { ctrl: true, code: 'KeyP' }), outside, 'win32', all, match)?.id, 'quickOpen')
+    assert.equal(commandForKey(key('σ', { meta: true, code: 'KeyS' }), outside, 'darwin', all, match)?.id, 'save')
   })
 
   it('matchesKey requires the exact Ctrl modifiers for literal Ctrl shortcuts', () => {

@@ -13,14 +13,18 @@ import {
   dropDoc,
   initialExpanded,
   insertTreeFile,
+  isUntitled,
   isWithin,
+  mergeScanDocs,
   namesIn,
   pushRecents,
   reconcileNote,
   reconcileScan,
   remapPaths,
   remapTree,
+  tabsToCarry,
   uniqueName,
+  unsavedIds,
   without
 } from './model'
 import type { DocSlice } from './model'
@@ -39,6 +43,30 @@ interface ScanOptions {
 
 function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`
+}
+
+/** The tab strip after a scan: the restored session, or every file (capped) for
+ *  openAll; null keeps the current tabs. */
+function tabsForScan(scan: FolderScan, opts: ScanOptions): { openTabs: string[] | null; activeId: string | null } {
+  const allFiles = scan.tree.flatMap((f) => f.files.map((x) => x.path))
+  let openTabs: string[] | null = null
+  let activeId: string | null = null
+  if (opts.restoreTabs?.length) {
+    openTabs = opts.restoreTabs.filter((p) => scan.contents[p] !== undefined || opts.availablePaths?.has(p))
+    activeId = opts.restoreActive && openTabs.includes(opts.restoreActive) ? opts.restoreActive : (openTabs[0] ?? null)
+  }
+  if (opts.openAll) {
+    openTabs = allFiles.slice(0, MAX_AUTO_OPEN)
+    activeId = openTabs[0] ?? null
+  }
+  if (openTabs && !openTabs.length && allFiles.length) return { openTabs: [allFiles[0]], activeId: allFiles[0] }
+  return { openTabs, activeId }
+}
+
+function openAllNote(scan: FolderScan): string {
+  const n = scan.tree.reduce((sum, f) => sum + f.files.length, 0)
+  if (n > MAX_AUTO_OPEN) return `Opened ${MAX_AUTO_OPEN} of ${n} Markdown files`
+  return n > 0 ? `Opened ${plural(n, 'Markdown file')}` : `${scan.name} has no Markdown files yet`
 }
 
 export function createFileActions(host: AppHost, docs: () => DocumentActions) {
@@ -63,38 +91,26 @@ export function createFileActions(host: AppHost, docs: () => DocumentActions) {
   }
 
   const applyScan = (scan: FolderScan, opts: ScanOptions): void => {
-    const allFiles = scan.tree.flatMap((f) => f.files.map((x) => x.path))
-    let openTabs: string[] | null = null
-    let activeId: string | null = null
-    let note: string | null = null
-    if (opts.restoreTabs?.length) {
-      openTabs = opts.restoreTabs.filter((p) => scan.contents[p] !== undefined || opts.availablePaths?.has(p))
-      activeId =
-        opts.restoreActive && openTabs.includes(opts.restoreActive) ? opts.restoreActive : (openTabs[0] ?? null)
-    }
-    if (opts.openAll) {
-      openTabs = allFiles.slice(0, MAX_AUTO_OPEN)
-      activeId = openTabs[0] ?? null
-      if (allFiles.length > MAX_AUTO_OPEN) note = `Opened ${MAX_AUTO_OPEN} of ${allFiles.length} Markdown files`
-      else if (allFiles.length > 0) note = `Opened ${plural(allFiles.length, 'Markdown file')}`
-      else note = `${scan.name} has no Markdown files yet`
-    }
-    if (openTabs && !openTabs.length && allFiles.length) {
-      openTabs = [allFiles[0]]
-      activeId = allFiles[0]
-    }
+    const { openTabs, activeId } = tabsForScan(scan, opts)
+    let note = opts.openAll ? openAllNote(scan) : null
+    // Unsaved edits are never replaced by disk text, and their tabs stay open.
+    const before = host.state()
+    const kept = unsavedIds(before.contents, before.saved).filter(
+      (id) => !isUntitled(id) && (scan.contents[id] !== undefined || (!!openTabs && !openTabs.includes(id)))
+    )
     host.update(
       (prev) => {
-        // Untitled documents survive opening another folder.
-        const untitled = prev.openTabs.filter((t) => t.startsWith('untitled:'))
-        const tabs = openTabs ? [...openTabs, ...untitled.filter((t) => !openTabs?.includes(t))] : prev.openTabs
+        const merged = mergeScanDocs(prev, scan)
+        const carry = tabsToCarry(prev)
+        const tabs = openTabs ? [...openTabs, ...carry.filter((t) => !openTabs?.includes(t))] : prev.openTabs
         const active = openTabs ? (activeId ?? tabs[0] ?? null) : prev.activeId
         return {
           tree: scan.tree,
           root: scan.root,
           rootName: scan.name,
-          contents: { ...prev.contents, ...scan.contents },
-          saved: { ...prev.saved, ...scan.contents },
+          contents: merged.contents,
+          saved: merged.saved,
+          externalChanges: merged.externalChanges,
           // Files now covered by the workspace shouldn't also linger as loose groups.
           looseFiles: prev.looseFiles.filter((f) => scan.contents[f.path] === undefined),
           expanded: initialExpanded(scan.tree),
@@ -109,6 +125,10 @@ export function createFileActions(host: AppHost, docs: () => DocumentActions) {
       },
       () => host.renderDoc(true)
     )
+    if (kept.length) {
+      const which = kept.length === 1 ? host.nameOf(kept[0]) : plural(kept.length, 'document')
+      note = `${note ? `${note}. ` : ''}Your unsaved edits in ${which} were kept.`
+    }
     if (note) host.toast(note)
   }
 
@@ -257,15 +277,30 @@ export function createFileActions(host: AppHost, docs: () => DocumentActions) {
     return clash ? `There's already a file named ${target} here` : null
   }
 
+  /** The sidebar group a file's row lives in (its folder, or its loose-file group). */
+  const groupOf = (path: string): string | null => {
+    const s = host.state()
+    return (
+      s.tree.find((f) => f.files.some((x) => x.path === path))?.id ??
+      s.looseFiles.find((f) => f.path === path)?.dir ??
+      null
+    )
+  }
+
   const startRename = (path: string, isFolder: boolean): void => {
     const s = host.state()
-    const rowVisible =
-      s.sidebarOpen && !s.focusMode && s.activity === 'files' && !s.compact && (isFolder || knownPaths().includes(path))
-    host.update(
-      rowVisible
-        ? { renaming: { path, isFolder }, menu: null }
-        : { dialog: { kind: 'rename', path, isFolder }, menu: null }
-    )
+    const treeShown = s.sidebarOpen && !s.focusMode && s.activity === 'files' && !s.compact
+    const group = isFolder ? null : groupOf(path)
+    if (!treeShown || (!isFolder && !group)) {
+      host.update({ dialog: { kind: 'rename', path, isFolder }, menu: null })
+      return
+    }
+    // The inline field only exists in an expanded folder, so open the folder first.
+    host.update((st) => ({
+      renaming: { path, isFolder },
+      menu: null,
+      expanded: group ? { ...st.expanded, [group]: true } : st.expanded
+    }))
   }
 
   const commitRename = async (path: string, name: string, isFolder: boolean): Promise<void> => {

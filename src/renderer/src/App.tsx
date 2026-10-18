@@ -4,9 +4,9 @@ import { computeOutline, computeStats, searchAll } from '@/lib/document'
 import type { SearchResult } from '@/lib/document'
 import { ReaderController } from '@/lib/reader/ReaderController'
 import type { EditorHandle } from '@/lib/editor/types'
-import { COMMANDS, rememberCommand, type CommandId } from '@/lib/commands'
+import { COMMANDS, commandLabel, rememberCommand, type CommandId, type PlatformWords } from '@/lib/commands'
 import { isAgentInstructionFile, titleFromMarkdown } from '@/lib/logic/files'
-import { formatShortcut } from '@/lib/logic/platform'
+import { formatShortcut, revealLabel, trashName } from '@/lib/logic/platform'
 import type { NamedFileRef, OutlineItem } from '@/state/viewmodel'
 import { InfoIcon } from '@/lib/icons'
 import Sidebar from '@/components/Sidebar'
@@ -59,6 +59,7 @@ export default class App extends Component<Record<string, never>, AppState> {
   private narrowQuery = media(NARROW_QUERY)
   private compactQuery = media(COMPACT_QUERY)
   private platform = window.api.platform
+  private words: PlatformWords = { trash: trashName(this.platform), reveal: revealLabel(this.platform) }
 
   private reader = new ReaderController({
     readImage: (docPath, src) => window.api.readImage(docPath, src),
@@ -282,6 +283,8 @@ export default class App extends Component<Record<string, never>, AppState> {
     return !!b && (b.enabled?.() ?? true)
   }
 
+  private hasCommand = (id: CommandId): boolean => !!this.commands[id]
+
   private runCommand = (id: CommandId): void => {
     const b = this.commands[id]
     if (!b || !(b.enabled?.() ?? true)) return
@@ -398,7 +401,18 @@ export default class App extends Component<Record<string, never>, AppState> {
   private quickOpen = (): void => this.view.openPalette('')
   private openSettings = (): void => this.view.openSettings('appearance')
   private openShortcuts = (): void => this.view.openSettings('shortcuts')
-  private scrollToHeading = (slug: string): void => this.reader.scrollToId(slug)
+  /** Outline click: the reader scrolls to the heading; Edit view (no reader)
+   *  moves the editor to the heading's line instead. */
+  private scrollToHeading = (slug: string): void => {
+    const s = this.state
+    const id = s.activeId
+    if (s.viewMode !== 'edit' || !id) return this.reader.scrollToId(slug)
+    const heading = computeOutline(s.contents[id] ?? '').find((o) => o.slug === slug)
+    if (!heading) return
+    this.setState((st) => ({
+      editorJump: { fileId: id, line: heading.line, col: 0, len: 0, nonce: (st.editorJump?.nonce ?? 0) + 1 }
+    }))
+  }
   private validateName = (path: string, name: string, isFolder: boolean): string | null =>
     this.files.validateName(path, name, isFolder)
   private commitRename = (path: string, name: string, isFolder: boolean): void =>
@@ -413,7 +427,7 @@ export default class App extends Component<Record<string, never>, AppState> {
   private paletteCommands(): PaletteCommand[] {
     return COMMANDS.filter((c) => !c.hideInPalette && this.isAvailable(c.id)).map((c) => ({
       id: c.id,
-      label: c.label,
+      label: commandLabel(c, this.words),
       group: c.group,
       keywords: c.keywords ?? '',
       shortcut: c.shortcuts?.[0] ? this.hint(c.shortcuts[0]) : null
@@ -669,6 +683,7 @@ export default class App extends Component<Record<string, never>, AppState> {
           docs={this.docs}
           files={this.files}
           runCommand={this.runCommand}
+          hasCommand={this.hasCommand}
           onRestore={() => void restoreRecovered(this.host, this.recovery)}
           onDiscard={this.discardRecovered}
           onCloseWindow={(save) => void this.closeWindow(save)}
