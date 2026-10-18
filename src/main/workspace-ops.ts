@@ -3,6 +3,7 @@ import { resolve } from 'path'
 import {
   approveFile,
   containsApprovedRoot,
+  grantKey,
   isApproved,
   isApprovedRoot,
   isInsideApprovedRoot
@@ -60,8 +61,11 @@ export async function renameApproved(store: SettingsStore, path: unknown, newNam
   }
   const from = resolve(path)
   if ((await isDirectory(from)) && !isInsideApprovedRoot(from)) denied()
+  // Keyed before the rename: afterwards a case-only rename on macOS makes the
+  // old spelling resolve to the new one.
+  const fromKey = grantKey(from)
   const to = await renamePath(from, newName)
-  if (to !== from) await moveGrants(store, from, to)
+  if (to !== from) await moveGrants(store, from, to, fromKey)
   return to
 }
 

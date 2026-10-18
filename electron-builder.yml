@@ -13,6 +13,12 @@ files:
   - out/**/*
   - package.json
   - '!node_modules{,/**/*}'
+# Linux window association: Electron takes the Wayland app_id from desktopName,
+# and syncDesktopName names the installed .desktop file and its StartupWMClass
+# after it, so docks link the running window to the launcher ("simplemd" is also
+# the X11 WM_CLASS instance). package.json would be the long-term home for it.
+extraMetadata:
+  desktopName: simplemd.desktop
 # Chromium ships ~55 UI locales; the app's own text is English.
 electronLanguages: [en-US]
 compression: maximum
@@ -81,6 +87,7 @@ linux:
     - target: rpm
       arch: [x64]
   category: Office
+  syncDesktopName: true
   icon: build/icon.png
   mimeTypes: [text/markdown, text/x-markdown]
   synopsis: A calm place to read what your AI writes

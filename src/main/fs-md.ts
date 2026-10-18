@@ -17,7 +17,9 @@ const IMG_MIME: Record<string, string> = {
 }
 
 const MAX_FILES = 4000
-const MAX_DEPTH = 12
+/** How deep the scanner walks below the root (the root is depth 0). The Linux
+ *  folder watcher uses the same bound. */
+export const MAX_SCAN_DEPTH = 12
 const MAX_FILE_BYTES = 5 * 1024 * 1024
 /** Images larger than this aren't shown. Equal to assets.ts MAX_ASSET_BYTES (a
  *  test keeps them equal), so every pasted image the editor saves is displayed. */
@@ -90,7 +92,7 @@ export function isScanIgnored(relPath: string): boolean {
 }
 
 async function walk(dir: string, depth: number, out: string[]): Promise<void> {
-  if (depth > MAX_DEPTH || out.length >= MAX_FILES) return
+  if (depth > MAX_SCAN_DEPTH || out.length >= MAX_FILES) return
   let entries
   try {
     entries = await fs.readdir(dir, { withFileTypes: true })

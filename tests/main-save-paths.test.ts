@@ -39,9 +39,15 @@ describe('chosenPath', () => {
     assert.equal(chosenPath(join(dir, 'page.htm'), '.html'), join(dir, 'page.htm'))
   })
 
-  it('refuses runnable file types', () => {
-    assert.throws(() => chosenPath(join(dir, 'evil.exe'), '.md'), /type/)
-    assert.throws(() => chosenPath(join(dir, 'evil.CMD'), '.md'), /type/)
+  it('treats a runnable ending as part of the title and adds the extension', () => {
+    assert.equal(chosenPath(join(dir, 'Intro to Node.js'), '.md'), join(dir, 'Intro to Node.js.md'))
+    assert.equal(chosenPath(join(dir, 'Learning Next.js'), '.html'), join(dir, 'Learning Next.js.html'))
+    assert.equal(chosenPath(join(dir, 'evil.exe'), '.md'), join(dir, 'evil.exe.md'))
+    assert.equal(chosenPath(join(dir, 'evil.CMD'), '.pdf'), join(dir, 'evil.CMD.pdf'))
+  })
+
+  it('still refuses a runnable final type', () => {
+    assert.throws(() => chosenPath(join(dir, 'notes'), '.exe'), /type/)
   })
 
   it('refuses network locations', () => {
@@ -67,6 +73,10 @@ describe('suggestedName / exportStem', () => {
     assert.equal(suggestedName('../../etc/notes.md', 'Untitled.md'), 'notes.md')
   })
 
+  it('keeps titles that only end like a program', () => {
+    assert.equal(suggestedName('Learning Next.js', 'Untitled.md'), 'Learning Next.js')
+  })
+
   it('falls back for invalid or missing names', () => {
     assert.equal(suggestedName(undefined, 'Untitled.md'), 'Untitled.md')
     assert.equal(suggestedName('   ', 'Untitled.md'), 'Untitled.md')
@@ -74,9 +84,15 @@ describe('suggestedName / exportStem', () => {
     assert.equal(suggestedName('a<b>.md', 'Untitled.md'), 'Untitled.md')
   })
 
-  it('strips the last extension for exports', () => {
+  it('strips a Markdown extension for exports', () => {
     assert.equal(exportStem('notes.md'), 'notes')
     assert.equal(exportStem('Version 1.2.md'), 'Version 1.2')
+    assert.equal(exportStem('Guide.markdown'), 'Guide')
     assert.equal(exportStem(42), 'document')
+  })
+
+  it('keeps other endings of a stem the renderer already stripped', () => {
+    assert.equal(exportStem('Intro to Node.js'), 'Intro to Node.js')
+    assert.equal(exportStem('Version 1.2'), 'Version 1.2')
   })
 })

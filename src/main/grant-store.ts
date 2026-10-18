@@ -1,4 +1,4 @@
-import { approveFile, approveRoot, moveFileGrants, revokeUnder } from './access'
+import { approveFile, approveRoot, grantKey, moveFileGrants, revokeUnder } from './access'
 import { rebasePath, rebasePaths } from './file-ops'
 import { addRecentFolder } from './recent-folders'
 import type { Settings } from '../shared/types'
@@ -49,9 +49,15 @@ export async function forgetGrantsUnder(store: SettingsStore, path: string): Pro
 }
 
 /** After a rename, individual grants (in memory and persisted) follow the file,
- *  or every file under a renamed folder. */
-export async function moveGrants(store: SettingsStore, from: string, to: string): Promise<void> {
-  moveFileGrants(from, to)
+ *  or every file under a renamed folder. `fromKey` is `from`'s grant key taken
+ *  before the rename (see moveFileGrants). */
+export async function moveGrants(
+  store: SettingsStore,
+  from: string,
+  to: string,
+  fromKey: string = grantKey(from)
+): Promise<void> {
+  moveFileGrants(from, to, fromKey)
   const list = persistedFiles(await store.load())
   const next = rebasePaths(list, from, to, caseInsensitive)
   if (next.some((p, i) => p !== list[i])) await store.save({ approvedFiles: next })
