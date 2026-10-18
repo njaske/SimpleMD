@@ -1,6 +1,7 @@
-// The imperative EditorHandle the App drives: formatting, focus, text insertion and the
-// source-line scroll position used by synced scrolling in Split view.
+// The imperative EditorHandle the App drives: formatting, focus, text insertion, the
+// find panel, and the source-line scroll position used by synced scrolling in Split view.
 import { EditorView } from '@codemirror/view'
+import { openSearchPanel } from '@codemirror/search'
 import { runFormat } from './commands'
 import type { EditorHandle } from './types'
 
@@ -91,6 +92,11 @@ export function createEditorHandle(view: EditorView): EditorHandleController {
       return () => {
         listeners.delete(cb)
       }
+    },
+    openSearch() {
+      if (!view.dom.isConnected) return
+      // Opening focuses the panel's field; when it's already open, that refocuses it.
+      openSearchPanel(view)
     }
   }
 
