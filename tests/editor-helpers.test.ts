@@ -1,8 +1,17 @@
 import assert from 'node:assert/strict'
+import { registerHooks } from 'node:module'
 import { describe, it } from 'node:test'
 import { BAR_METRICS, barWidth, controlCount, rovingIndex, visibleGroupCount } from '../src/renderer/src/lib/editor/formatLayout.ts'
 import { ariaShortcut, FORMAT_SHORTCUTS, shortcutFor, toCodeMirrorKey } from '../src/renderer/src/lib/editor/shortcuts.ts'
-import { imageAlt, isImageFile, markdownImage, UNSAVED_NOTICE } from '../src/renderer/src/lib/editor/images.ts'
+
+// images.ts imports its siblings without extensions (Vite style); node needs the ".ts".
+registerHooks({
+  resolve(specifier, context, next) {
+    const extensionless = /^\.\.?\//.test(specifier) && !/\.\w+$/.test(specifier)
+    return next(extensionless && context.parentURL?.endsWith('.ts') ? `${specifier}.ts` : specifier, context)
+  }
+})
+const { imageAlt, isImageFile, markdownImage, UNSAVED_NOTICE } = await import('../src/renderer/src/lib/editor/images.ts')
 
 describe('format bar layout', () => {
   const groups = [4, 2, 4, 3]

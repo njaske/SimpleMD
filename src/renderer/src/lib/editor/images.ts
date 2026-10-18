@@ -3,6 +3,7 @@
 // file drops are handed to the app untouched so it can open them.
 import { StateEffect, StateField, type Extension } from '@codemirror/state'
 import { EditorView, ViewPlugin } from '@codemirror/view'
+import { dragCarriesImages, IMAGE_TYPES } from './drops'
 
 /** Resolves to the Markdown-ready relative path, or null when the document has no folder. */
 export type SaveImage = (file: File) => Promise<string | null>
@@ -16,8 +17,6 @@ export interface ImageHooks {
 export const UNSAVED_NOTICE = 'Save this document first to add images'
 const FAILED_NOTICE = "Couldn't add the image. Check that the document's folder still exists, then try again."
 
-// The formats the main process accepts (it checks the bytes too).
-const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/avif'])
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|avif)$/i
 
 export function isImageFile(file: { type: string; name: string }): boolean {
@@ -114,11 +113,6 @@ function imagesOf(list: FileList | null | undefined): File[] {
   return Array.from(list ?? []).filter(isImageFile)
 }
 
-/** During a drag only the item types are readable, not the files themselves. */
-function dragCarriesImages(data: DataTransfer | null): boolean {
-  return Array.from(data?.items ?? []).some((item) => item.kind === 'file' && IMAGE_TYPES.has(item.type))
-}
-
 const hasFiles = (data: DataTransfer | null): boolean => Array.from(data?.types ?? []).includes('Files')
 
 /** Files the editor won't take (Markdown, folders, or images with nowhere to save them) go
@@ -153,7 +147,8 @@ function forwardFileDrops(hooks: ImageHooks): Extension {
   })
 }
 
-/** Image paste and drop. Unsaved documents get `hooks.notice(UNSAVED_NOTICE)`. */
+/** Image paste and drop. Unsaved documents get `hooks.notice(UNSAVED_NOTICE)`. A drop the
+ *  editor takes is cancelled but still bubbles; see drops.ts for how the app skips it. */
 export function imageHandling(hooks: ImageHooks): Extension {
   return [
     pendingField,
@@ -169,6 +164,9 @@ export function imageHandling(hooks: ImageHooks): Extension {
         const images = imagesOf(event.dataTransfer?.files)
         if (!images.length || !hooks.save()) return false
         const pos = view.posAtCoords({ x: event.clientX, y: event.clientY }) ?? view.state.selection.main.head
+        // Cancelled on purpose: the drop still bubbles, and the app's isEditorHandledDrop
+        // (drops.ts) reads this to know the editor took it.
+        event.preventDefault()
         view.focus()
         insertImages(view, images, { from: pos, to: pos }, hooks, 'input.drop')
         return true

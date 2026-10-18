@@ -203,7 +203,7 @@ function unmarkChanges(text: string, seg: TextRange, state: SegState): TextChang
 }
 
 function wrapChanges(text: string, seg: TextRange, spec: MarkSpec): TextChange[] {
-  if (spec.chars[0] !== '`') {
+  if (!isCode(spec)) {
     return [{ from: seg.from, to: seg.from, insert: spec.insert }, { from: seg.to, to: seg.to, insert: spec.insert }]
   }
   // Inline code that itself contains backticks needs a longer fence (and padding).
@@ -220,7 +220,7 @@ function markChanges(text: string, seg: TextRange, spec: MarkSpec): TextChange[]
   const [start, end] = lineAround(text, seg.from)
   const overlaps = (s: Span): boolean => s.open.from < seg.to && seg.from < s.close.from + s.close.len
   const spans =
-    spec.chars[0] === '`' || seg.to > end
+    isCode(spec) || seg.to > end
       ? []
       : spansOnLine(text, start, end).filter((s) => spec.chars.includes(s.open.ch) && spec.present(Math.min(s.open.len, s.close.len)) && overlaps(s))
   if (!spans.length) return wrapChanges(text, seg, spec)
@@ -254,7 +254,29 @@ function toggleSegments(text: string, segments: readonly TextRange[], spec: Mark
   return segments.flatMap((seg, k) => (states[k].side === 'none' ? markChanges(text, seg, spec) : []))
 }
 
+const isCode = (spec: MarkSpec): boolean => spec.chars[0] === '`'
+
+/** `seg` grown to cover every code span it reaches into: code is literal, so other marks
+ *  go around a whole span ("**`code`**"), never inside it. */
+function outsideCode(text: string, seg: TextRange): TextRange {
+  const [start, end] = lineAround(text, seg.from)
+  if (seg.to > end) return seg
+  const inside = (pos: number, s: Span): boolean => s.open.from < pos && pos < s.close.from + s.close.len
+  const reached = spansOnLine(text, start, end).filter((s) => s.open.ch === '`' && (inside(seg.from, s) || inside(seg.to, s)))
+  if (!reached.length) return seg
+  return {
+    from: Math.min(seg.from, ...reached.map((s) => s.open.from)),
+    to: Math.max(seg.to, ...reached.map((s) => s.close.from + s.close.len))
+  }
+}
+
 function toggleInlineAtCursor(text: string, pos: number, spec: MarkSpec): FormatEdit {
+  // In a code span, bold/italic/strikethrough toggle on the whole span.
+  const code = isCode(spec) ? null : outsideCode(text, { from: pos, to: pos })
+  if (code && code.from < code.to) {
+    const changes = sortChanges(toggleSegments(text, [code], spec))
+    return select(changes, mapPos(changes, pos, 1))
+  }
   // "**|**": an empty pair the user just made; take it away again.
   for (const ch of spec.chars) {
     const n = Math.min(runAt(text, pos, -1, ch, 8), runAt(text, pos, 1, ch, 8))
@@ -287,6 +309,7 @@ export function toggleInline(state: TextState, cmd: InlineCommand): FormatEdit |
   const segments = range(first, last)
     .map((i) => inlineSegment(doc, i, sel))
     .filter((s): s is TextRange => s !== null)
+    .map((s) => (isCode(spec) ? s : outsideCode(text, s)))
   if (!segments.length) return null
   const changes = sortChanges(toggleSegments(text, segments, spec))
   if (first === last) return keepSelection(changes, sel)

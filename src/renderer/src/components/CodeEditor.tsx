@@ -26,7 +26,9 @@ interface Props {
   /** Receives the imperative handle once mounted, and null on unmount (CONTRACT: lane E). */
   onReady?: (handle: EditorHandle | null) => void
   /** Save a pasted/dropped image next to the document; resolves to the relative link
-   *  path ("assets/x.png"), or null when the document has no folder yet (untitled). */
+   *  path ("assets/x.png"), or null when the document has no folder yet (untitled).
+   *  Image drops the editor takes still bubble (cancelled): the app's drop handlers should
+   *  skip them with isEditorHandledDrop / isEditorImageDrag from lib/editor/drops. */
   onSaveImage?: (file: File) => Promise<string | null>
   /** Short messages for the user ("Save this document first to add images"). When this
    *  is omitted the editor shows them itself as a small inline notice. */

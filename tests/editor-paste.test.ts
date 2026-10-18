@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict'
+import { registerHooks } from 'node:module'
 import { before, describe, it } from 'node:test'
 import { Window } from 'happy-dom'
+
+// The paste modules import their siblings without extensions (Vite style); node needs
+// the ".ts".
+registerHooks({
+  resolve(specifier, context, next) {
+    const extensionless = /^\.\.?\//.test(specifier) && !/\.\w+$/.test(specifier)
+    return next(extensionless && context.parentURL?.endsWith('.ts') ? `${specifier}.ts` : specifier, context)
+  }
+})
 
 // DOMPurify binds to `window` when it is first imported, so install a DOM before loading
 // the module under test.
@@ -133,11 +143,11 @@ describe('tsvToTable', () => {
 describe('convertPaste', () => {
   it('prefers a table for tab-separated text even when HTML is present', () => {
     const result = paste.convertPaste('<table><tr><td>a</td></tr></table>', 'a\tb\nc\td')
-    assert.deepEqual(result, { markdown: '| a   | b   |\n| --- | --- |\n| c   | d   |', block: true })
+    assert.deepEqual(result, { markdown: '| a   | b   |\n| --- | --- |\n| c   | d   |', block: true, fresh: true })
   })
 
   it('converts rich HTML', () => {
-    assert.deepEqual(paste.convertPaste('<p><strong>hi</strong></p>', 'hi'), { markdown: '**hi**', block: false })
+    assert.deepEqual(paste.convertPaste('<p><strong>hi</strong></p>', 'hi'), { markdown: '**hi**', block: false, fresh: false })
   })
 
   it('leaves plain text and formatting-free HTML alone', () => {
@@ -147,5 +157,76 @@ describe('convertPaste', () => {
 
   it('leaves the paste alone when the conversion equals the plain text', () => {
     assert.equal(paste.convertPaste('<code>x</code>', '`x`'), null)
+  })
+})
+
+describe('clipboard sources that only look rich', () => {
+  const sheetsCell =
+    '<google-sheets-html-origin><style type="text/css"><!--td {border: 1px solid #cccccc;}--></style><table cellspacing="0" cellpadding="0" dir="ltr" border="1" data-sheets-root="1"><colgroup><col width="100"/></colgroup><tbody><tr style="height:21px;"><td style="text-align:right;" data-sheets-value="{&quot;1&quot;:3,&quot;3&quot;:42.5}">42.5</td></tr></tbody></table></google-sheets-html-origin>'
+  const excelCell =
+    '<html xmlns:o="urn:schemas-microsoft-com:office:office"><head><meta name=ProgId content=Excel.Sheet><style>td {mso-number-format:General;}</style></head><body link="#0563C1"><table border=0 cellpadding=0 cellspacing=0 width=64><col width=64><tr height=20><!--StartFragment--><td height=20 class=xl65 align=right width=64>42.5</td><!--EndFragment--></tr></table></body></html>'
+
+  it('pastes one spreadsheet cell as plain text', () => {
+    assert.equal(paste.convertPaste(sheetsCell, '42.5'), null)
+    assert.equal(paste.convertPaste(excelCell, '42.5\r\n'), null)
+  })
+
+  it('pastes a single row or a single column as plain text', () => {
+    assert.equal(paste.convertPaste('<table><tr><td>a</td><td>b</td></tr></table>', 'a\tb'), null)
+    assert.equal(paste.convertPaste('<table><tr><td>a</td></tr><tr><td>b</td></tr><tr><td>c</td></tr></table>', 'a\nb\nc'), null)
+  })
+
+  it('keeps formatting inside a lone cell without making a table', () => {
+    const result = paste.convertPaste('<table><tr><td><a href="https://a.dev">site</a></td></tr></table>', 'site')
+    assert.deepEqual(result, { markdown: '[site](https://a.dev)', block: false, fresh: false })
+  })
+
+  const vscode =
+    `<meta charset='utf-8'><div style="color: #abb2bf;background-color: #282c34;font-family: 'Fira Code', Consolas, monospace;font-weight: normal;font-size: 14px;line-height: 19px;white-space: pre;">` +
+    '<div><span style="color: #7f848e;font-style: italic;">// add two numbers</span></div>' +
+    '<div><span style="color: #c678dd;">function</span><span style="color: #abb2bf;"> </span><span style="color: #61afef;">add</span><span style="color: #abb2bf;">(</span><span style="color: #e06c75;font-style: italic;">a</span><span style="color: #abb2bf;">, </span><span style="color: #e06c75;font-style: italic;">b</span><span style="color: #abb2bf;">) {</span></div>' +
+    '<div><span style="color: #abb2bf;">    </span><span style="color: #c678dd;">return</span><span style="color: #abb2bf;"> a </span><span style="color: #56b6c2;">*</span><span style="color: #abb2bf;"> b_c</span></div>' +
+    '<div><span style="color: #abb2bf;">}</span></div></div>'
+
+  it('pastes code copied from VS Code as the plain text, italic tokens and all', () => {
+    const text = '// add two numbers\nfunction add(a, b) {\n    return a * b_c\n}'
+    assert.equal(paste.htmlToMarkdown(vscode), null)
+    assert.equal(paste.convertPaste(vscode, text), null)
+  })
+
+  it('still converts Google Docs, whose spans are white-space:pre-wrap', () => {
+    const md = paste.htmlToMarkdown(
+      '<b style="font-weight:normal;" id="docs-internal-guid-2"><p dir="ltr"><span style="font-weight:700;white-space:pre;white-space:pre-wrap;">Bold</span><span style="white-space:pre-wrap;"> text</span></p></b>'
+    )
+    assert.equal(md, '**Bold** text')
+  })
+})
+
+describe('blank lines in pasted code', () => {
+  it('keeps consecutive blank lines inside a fenced block', () => {
+    const md = paste.htmlToMarkdown('<pre><code class="language-python">import os\n\n\ndef f():\n    pass\n</code></pre>')
+    assert.equal(md, '```python\nimport os\n\n\ndef f():\n    pass\n```')
+  })
+
+  it('collapses blank-line runs only outside fences', () => {
+    assert.equal(paste.collapseBlankLines('a\n\n\n\nb\n\n```\nx\n\n\ny\n```\n\n\nc'), 'a\n\nb\n\n```\nx\n\n\ny\n```\n\nc')
+  })
+})
+
+describe('pasted HTML tables', () => {
+  const table = '<table><tr><th>a</th><th>b</th></tr><tr><td>1</td><td>2</td></tr></table>'
+
+  it('marks a converted table as a block with a fresh paragraph after it', () => {
+    assert.deepEqual(paste.convertPaste(table, 'a b\n1 2'), { markdown: '| a | b |\n| --- | --- |\n| 1 | 2 |', block: true, fresh: true })
+  })
+
+  it('keeps a table-led paste on its own lines but ends it where the prose ends', () => {
+    const result = paste.convertPaste(`${table}<p>After</p>`, 'a b 1 2 After')
+    assert.deepEqual(result, { markdown: '| a | b |\n| --- | --- |\n| 1 | 2 |\n\nAfter', block: true, fresh: false })
+  })
+
+  it('lets prose around a table flow as normal', () => {
+    const result = paste.convertPaste(`<p>Intro</p>${table}<p>After</p>`, 'Intro a b 1 2 After')
+    assert.equal(result?.block, false)
   })
 })

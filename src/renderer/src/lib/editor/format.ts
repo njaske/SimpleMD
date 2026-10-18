@@ -228,8 +228,11 @@ function indentedItem(lines: readonly string[], i: number, dir: 1 | -1): { line:
   const current = width(p.indent)
   let target = current
   if (dir > 0) {
+    // The first item of a list has nothing to nest under; indenting it would only shift
+    // the source while it still renders as a top-level item.
     const sibling = itemAbove(lines, i, (w) => w === current, current)
-    target = sibling ? width(sibling.indent) + sibling.marker.length + Math.max(1, sibling.gap.length) : current + p.marker.length + 1
+    if (!sibling) return { line: lines[i], delta: 0 }
+    target = width(sibling.indent) + sibling.marker.length + Math.max(1, sibling.gap.length)
   } else if (current > 0) {
     const parent = itemAbove(lines, i, (w) => w < current, -1)
     target = parent ? width(parent.indent) : 0
@@ -240,8 +243,9 @@ function indentedItem(lines: readonly string[], i: number, dir: 1 | -1): { line:
   return { line: p.quote + ' '.repeat(target) + marker + p.gap + p.box + p.body, delta: target - current }
 }
 
-/** Tab / Shift+Tab on list items: nest under the previous sibling or move out to the
- *  parent's level, then renumber. Lines in fenced code are never items, only carried
+/** Tab / Shift+Tab on list items: nest under the previous sibling (a first item stays
+ *  put, so selecting a list nests the rest under it) or move out to the parent's level,
+ *  then renumber. Lines in fenced code are never items, only carried
  *  along with the item above. Null when no touched line is a list item. */
 export function indentList(state: TextState, dir: 1 | -1): FormatEdit | null {
   const doc = toDoc(state.text)

@@ -230,6 +230,16 @@ describe('indenting list items', () => {
     assert.equal(tab('- a¦', -1), '- a¦')
   })
 
+  it('leaves the first item alone on Tab, since it has nothing to nest under', () => {
+    assert.equal(tab('- a¦\n- b', 1), '- a¦\n- b')
+    assert.equal(tab('- a\n  - b¦', 1), '- a\n  - b¦')
+  })
+
+  it('nests the rest of a selected list under its first item', () => {
+    assert.equal(tab('- ‹a\n- b\n- c›', 1), '- ‹a\n  - b\n  - c›')
+    assert.equal(tab('1. ‹a\n2. b\n3. c›', 1), '1. ‹a\n   1. b\n   2. c›')
+  })
+
   it('returns null outside lists so Tab can indent normally', () => {
     assert.equal(tab('plain¦', 1), null)
   })
@@ -354,6 +364,27 @@ describe('helpers', () => {
     assert.equal(mapPos(changes, 1, -1), 0)
     assert.equal(mapPos(changes, 1, 1), 2)
     assert.equal(mapPos(changes, 3, -1), 2)
+  })
+})
+
+describe('inline marks and code spans', () => {
+  it('wraps a whole code span instead of adding markers inside it', () => {
+    assert.equal(fmt('`co¦de`', 'bold'), '**`co¦de`**')
+    assert.equal(fmt('see `‹code›` now', 'italic'), 'see *`‹code›`* now')
+    assert.equal(fmt('`co¦de`', 'strikethrough'), '~~`co¦de`~~')
+  })
+
+  it('takes the mark back off from inside the code span', () => {
+    assert.equal(fmt('**`co¦de`**', 'bold'), '`co¦de`')
+    assert.equal(fmt('*`‹code›`*', 'italic'), '`‹code›`')
+  })
+
+  it('grows a selection that reaches into a code span to cover it', () => {
+    assert.equal(applyEdit('say `code` now', applyFormat('bold', parse('‹say `co›de` now'))!), '**say `code`** now')
+  })
+
+  it('still toggles inline code itself from inside the span', () => {
+    assert.equal(fmt('`co¦de`', 'code'), 'co¦de')
   })
 })
 

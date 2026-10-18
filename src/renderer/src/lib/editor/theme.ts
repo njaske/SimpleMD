@@ -122,9 +122,9 @@ export const editorTheme = EditorView.theme({
   '.cm-activeLine': { backgroundColor: 'color-mix(in oklch, currentColor 3.5%, transparent)', borderRadius: '3px' },
   '&:not(.cm-focused) .cm-activeLine': { backgroundColor: 'transparent' },
   '.cm-gutters': { backgroundColor: c.bg, color: c.faint, border: 'none', fontVariantNumeric: 'tabular-nums' },
-  '.cm-lineNumbers .cm-gutterElement': { minWidth: '3ch', padding: '0 8px 0 18px', opacity: 0.7, fontSize: '0.86em' },
+  // --fg-faint is tuned for AA on every surface; dimming it further would fail contrast.
+  '.cm-lineNumbers .cm-gutterElement': { minWidth: '3ch', padding: '0 8px 0 18px', fontSize: '0.86em' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent', color: c.muted },
-  '.cm-activeLineGutter.cm-gutterElement': { opacity: 1 },
   '&:not(.cm-focused) .cm-activeLineGutter': { color: c.faint },
   '.cm-foldGutter .cm-gutterElement': { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '16px', color: c.faint, opacity: 0, transition: `opacity ${c.fast}` },
   '.cm-gutters:hover .cm-foldGutter .cm-gutterElement, .cm-foldGutter .cm-gutterElement:has(.is-folded)': { opacity: 1 },
