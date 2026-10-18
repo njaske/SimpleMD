@@ -47,6 +47,24 @@ describe('validateFileName', () => {
     assert.equal(validateFileName('   ', 'linux'), 'Enter a name')
   })
 
+  it('treats a name made only of invisible characters as empty', () => {
+    for (const name of [ZWSP, `${ZWSP}${ZWJ}`, `${BOM} ${WORD_JOINER}`, String.fromCharCode(0xad)]) {
+      assert.equal(validateFileName(name, 'darwin'), 'Enter a name', JSON.stringify(name))
+    }
+  })
+
+  it('refuses bidi override and isolate characters that can disguise an extension', () => {
+    for (const code of [0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069]) {
+      const name = `notes${String.fromCharCode(code)}dm.exe`
+      assert.equal(validateFileName(name, 'linux'), "A name can't contain hidden text-direction characters", code.toString(16))
+    }
+  })
+
+  it('still accepts names whose emoji or scripts use joiners', () => {
+    assert.equal(validateFileName(`👨${ZWJ}👩${ZWJ}👧 family.md`, 'win32'), null)
+    assert.equal(validateFileName(`می${ZWNJ}خواهم.md`, 'win32'), null)
+  })
+
   it('refuses "." and ".."', () => {
     assert.match(validateFileName('.', 'darwin') ?? '', /"\." or "\.\."/)
     assert.ok(validateFileName('..', 'darwin'))
@@ -182,6 +200,22 @@ describe('titleFromMarkdown', () => {
     assert.equal(titleFromMarkdown('# my_file_name and snake_case'), 'my_file_name and snake_case')
   })
 
+  it('leaves unpaired emphasis markers like *args and **kwargs alone', () => {
+    assert.equal(titleFromMarkdown('Use *args and **kwargs here'), 'Use *args and **kwargs here')
+    assert.equal(titleFromMarkdown('# Set *ptr = &x first'), 'Set *ptr = &x first')
+    assert.equal(titleFromMarkdown('# a ** b and c * d'), 'a ** b and c * d')
+  })
+
+  it('reads links whose address holds parentheses', () => {
+    assert.equal(titleFromMarkdown('# See [Foo](https://en.wikipedia.org/wiki/Foo_(bar)) now'), 'See Foo now')
+  })
+
+  it('strips nested and triple emphasis', () => {
+    assert.equal(titleFromMarkdown('# ***Bold italic*** text'), 'Bold italic text')
+    assert.equal(titleFromMarkdown('# **a *b* c** and *d **e** f*'), 'a b c and d e f')
+    assert.equal(titleFromMarkdown('# ==marked== and ~~struck~~'), 'marked and struck')
+  })
+
   it('strips quote, list and task markers', () => {
     assert.equal(titleFromMarkdown('> > Quoted line'), 'Quoted line')
     assert.equal(titleFromMarkdown('- [ ] Buy milk'), 'Buy milk')
@@ -230,6 +264,42 @@ describe('titleFromMarkdown', () => {
   it('never splits an emoji when cutting', () => {
     const t = titleFromMarkdown(`# ${'😀'.repeat(20)}`, 5) ?? ''
     assert.equal(t, '😀😀😀😀…')
+  })
+
+  it('keeps ZWJ emoji sequences and flags whole when cutting', () => {
+    // Arrange
+    const family = `👨${ZWJ}👩${ZWJ}👧${ZWJ}👦`
+    const flag = '🇯🇵'
+
+    // Act
+    const families = titleFromMarkdown(`# ${family.repeat(7)}`, 5)
+    const flags = titleFromMarkdown(`# ${flag.repeat(60)}`, 48)
+
+    // Assert
+    assert.equal(families, `${family.repeat(4)}…`)
+    assert.equal(flags, `${flag.repeat(47)}…`)
+  })
+
+  it('counts an accented letter written with a combining mark as one character', () => {
+    const e = `e${String.fromCharCode(0x301)}`
+    assert.equal(titleFromMarkdown(`# ${e.repeat(10)}`, 4), `${e.repeat(3)}…`)
+  })
+
+  it('stays fast on pathological input (unclosed comments, links, tags and emphasis)', () => {
+    const units = ['<!-- ', '[', '![', '[a](', '<a ', '**x ', '*x ', '_x ', '__x ', '~~x ', '`` ', '<http://x ']
+    for (const unit of units) {
+      // Arrange: about 100 KB of openers that never close
+      const md = unit.repeat(Math.ceil(100_000 / unit.length))
+
+      // Act
+      const started = performance.now()
+      titleFromMarkdown(md)
+      suggestFileName(md)
+      const elapsed = performance.now() - started
+
+      // Assert
+      assert.ok(elapsed < 500, `${JSON.stringify(unit)} took ${elapsed.toFixed(1)} ms`)
+    }
   })
 
   it('handles a huge document quickly', () => {
@@ -289,8 +359,17 @@ describe('suggestFileName', () => {
     assert.match(name, /^word( word)*\.md$/)
   })
 
+  it('drops invisible and text-direction characters from pasted titles', () => {
+    assert.equal(suggestFileName(`# Plan${ZWSP} for${String.fromCharCode(0x202e)} Q3${BOM}`), 'Plan for Q3.md')
+    assert.equal(suggestFileName(`# ${ZWSP}${ZWJ}${WORD_JOINER}`), 'Untitled.md')
+    assert.equal(suggestFileName(`# Team 👨${ZWJ}👩${ZWJ}👧`), `Team 👨${ZWJ}👩${ZWJ}👧.md`)
+  })
+
   it('always produces a name that validates on every platform', () => {
-    const samples = ['# Ünïcödé 😀 notes', '# a.', '#  . ', '# x'.repeat(50), '# COM3.txt', '# tab\there', '#   ']
+    const samples = [
+      '# Ünïcödé 😀 notes', '# a.', '#  . ', '# x'.repeat(50), '# COM3.txt', '# tab\there', '#   ',
+      `# ${ZWSP}`, `# a${String.fromCharCode(0x2066)}b`, `# ${`👨${ZWJ}👩${ZWJ}👧`.repeat(30)}`
+    ]
     for (const md of samples) {
       const name = suggestFileName(md)
       for (const platform of ['win32', 'darwin', 'linux'] as const) {
@@ -361,8 +440,10 @@ describe('normalizePastedMarkdown', () => {
     assert.equal(normalizePastedMarkdown('copy to clipboard\n~~~\nx\n~~~'), '~~~\nx\n~~~\n')
   })
 
-  it('removes copy residue as the first line inside a fence', () => {
-    assert.equal(normalizePastedMarkdown('```js\nCopy code\nlet a = 1\n```'), '```js\nlet a = 1\n```\n')
+  it('never removes copy-looking lines inside a fence, which may be real code', () => {
+    for (const md of ['```\ncopy\n```', '```\nCOPY\nx\n```', '```js\nCopy code\nlet a = 1\n```', '```bat\ncopy\ncopy a.txt b.txt\n```']) {
+      assert.equal(normalizePastedMarkdown(md), `${md}\n`, md)
+    }
   })
 
   it('keeps words like "Edit" or a language name when no Copy label is there', () => {
@@ -391,6 +472,30 @@ describe('normalizePastedMarkdown', () => {
   it('leaves an unclosed fence (and everything after it) unchanged', () => {
     const md = `text\n\`\`\`\ncode${NBSP}\nmore${ZWSP}`
     assert.equal(normalizePastedMarkdown(md), `${md}\n`)
+  })
+
+  it('pairs inline code runs by length, leaving unmatched runs as text', () => {
+    // Arrange: `a` and ``b`c`` are spans; the last ` has no partner, so it is text
+    const md = `x${NBSP}\`a${NBSP}\`y \`\`b${NBSP}\`c\`\` z${NBSP}\` lone${NBSP}end`
+
+    // Act
+    const out = normalizePastedMarkdown(md)
+
+    // Assert
+    assert.equal(out, `x \`a${NBSP}\`y \`\`b${NBSP}\`c\`\` z \` lone end\n`)
+  })
+
+  it('stays fast on a line with thousands of unmatched backtick runs', () => {
+    // Arrange: 40,000 runs of growing length, none of which closes another
+    const line = Array.from({ length: 40_000 }, (_, i) => `${'`'.repeat((i % 200) + 1)}x`).join(' ')
+
+    // Act
+    const started = performance.now()
+    normalizePastedMarkdown(line)
+    const elapsed = performance.now() - started
+
+    // Assert
+    assert.ok(elapsed < 300, `took ${elapsed.toFixed(1)} ms`)
   })
 
   it('handles a large paste quickly', () => {

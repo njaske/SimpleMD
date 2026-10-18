@@ -4,6 +4,10 @@ import { changedLineRanges, countChangedLines, mergeRanges } from '../src/render
 
 const lines = (...ls: string[]): string => ls.join('\n')
 
+/** `count` distinct, realistic-looking lines, joined. */
+const generated = (count: number, tag: string): string =>
+  Array.from({ length: count }, (_, i) => `${tag} paragraph ${i}: some words that vary ${(i * 7) % 13}`).join('\n')
+
 describe('changedLineRanges: no change', () => {
   it('returns [] for identical texts', () => {
     assert.deepEqual(changedLineRanges('a\nb', 'a\nb'), [])
@@ -139,6 +143,87 @@ describe('changedLineRanges: large documents', () => {
     // Assert
     assert.deepEqual(ranges, [{ from: 0, to: 40_000 }])
     assert.ok(elapsed < 3000, `took ${elapsed.toFixed(1)} ms`)
+  })
+
+  it('marks a full rewrite of a typical 5,000-line file without stalling the UI', () => {
+    // Arrange: an agent rewrote every line
+    const before = generated(5000, 'old')
+    const after = generated(5000, 'new')
+    changedLineRanges(before, after) // warm up the JIT
+
+    // Act
+    const started = performance.now()
+    const ranges = changedLineRanges(before, after)
+    const elapsed = performance.now() - started
+
+    // Assert (typically a few ms; the bound is generous for slow CI machines)
+    assert.deepEqual(ranges, [{ from: 0, to: 5000 }])
+    assert.ok(elapsed < 60, `took ${elapsed.toFixed(1)} ms`)
+  })
+
+  it('reports scattered edits exactly, even when there are thousands of them', () => {
+    // Arrange: every 10th line of a 20,000-line document edited
+    const base = generated(20_000, 'line').split('\n')
+    const edited = base.map((l, i) => (i % 10 === 0 ? `${l} (edited)` : l))
+
+    // Act
+    const started = performance.now()
+    const ranges = changedLineRanges(base.join('\n'), edited.join('\n'))
+    const elapsed = performance.now() - started
+
+    // Assert
+    assert.equal(ranges.length, 2000)
+    assert.ok(ranges.every((r, k) => r.from === k * 10 && r.to === k * 10 + 1))
+    assert.ok(elapsed < 500, `took ${elapsed.toFixed(1)} ms`)
+  })
+
+  it('reports only the rewritten half when an agent replaces the second half', () => {
+    // Arrange
+    const base = generated(6000, 'kept').split('\n')
+    const after = [...base.slice(0, 3000), ...generated(3000, 'fresh').split('\n')]
+
+    // Act
+    const ranges = changedLineRanges(base.join('\n'), after.join('\n'))
+
+    // Assert
+    assert.deepEqual(ranges, [{ from: 3000, to: 6000 }])
+  })
+
+  it('marks a moved block and the spot it left', () => {
+    // Arrange: the first half moved below the second
+    const base = generated(2000, 'para').split('\n')
+    const after = [...base.slice(1000), ...base.slice(0, 1000)]
+
+    // Act
+    const ranges = changedLineRanges(base.join('\n'), after.join('\n'))
+
+    // Assert: one half stays put, the other is reported as new
+    assert.equal(countChangedLines(ranges), 1000 + (ranges.length > 1 ? 1 : 0))
+  })
+
+  it('finds edits in a document made of repeated lines (no unique lines to split at)', () => {
+    // Arrange: blank lines, rules and table rows repeat throughout
+    const base = Array.from({ length: 4000 }, (_, i) => ['', '---', '| a | b |', 'text'][i % 4])
+    const edited = base.map((l, i) => (i % 400 === 3 ? 'changed text' : l))
+
+    // Act
+    const ranges = changedLineRanges(base.join('\n'), edited.join('\n'))
+
+    // Assert
+    assert.deepEqual(ranges, Array.from({ length: 10 }, (_, k) => ({ from: k * 400 + 3, to: k * 400 + 4 })))
+  })
+
+  it('approximates a big rewrite of repeated lines line by line', () => {
+    // Arrange: no unique lines and more edits than a precise diff will take on
+    const base = Array.from({ length: 3000 }, (_, i) => ['alpha', 'beta', ''][i % 3])
+    const edited = base.map((l, i) => (i % 3 === 0 ? `alpha ${i % 7}` : l))
+
+    // Act
+    const ranges = changedLineRanges(base.join('\n'), edited.join('\n'))
+
+    // Assert: exactly the 1,000 rewritten lines, each on its own
+    assert.equal(ranges.length, 1000)
+    assert.ok(ranges.every((r, k) => r.from === k * 3 && r.to === k * 3 + 1))
   })
 })
 

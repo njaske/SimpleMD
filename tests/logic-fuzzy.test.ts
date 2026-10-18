@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { fuzzyFilter, fuzzyMatch } from '../src/renderer/src/lib/logic/fuzzy.ts'
+import { fuzzyFilter, fuzzyMatch, scoreAlignment } from '../src/renderer/src/lib/logic/fuzzy.ts'
 
 /** The matched characters, read back through the reported positions. */
 function picked(text: string, positions: readonly number[]): string {
@@ -15,6 +15,57 @@ function score(query: string, text: string): number {
 
 function order(query: string, texts: readonly string[]): string[] {
   return fuzzyFilter(query, texts, (t) => t).map((r) => r.item)
+}
+
+/** A small seeded generator (LCG), so the property test is reproducible. */
+function seededRandom(seed: number): () => number {
+  let state = seed
+  return () => {
+    state = (state * 1103515245 + 12345) & 0x7fffffff
+    return state / 0x7fffffff
+  }
+}
+
+function randomString(next: () => number, alphabet: string, maxLength: number): string {
+  const length = 1 + Math.floor(next() * maxLength)
+  return Array.from({ length }, () => alphabet[Math.floor(next() * alphabet.length)]).join('')
+}
+
+/** Every alignment of `query` in `text` (ASCII only), by brute force. */
+function allAlignments(query: string, text: string): number[][] {
+  const q = query.toLowerCase()
+  const t = text.toLowerCase()
+  const out: number[][] = []
+  const walk = (from: number, acc: number[]): void => {
+    if (acc.length === q.length) {
+      out.push(acc)
+      return
+    }
+    for (let j = from; j < t.length; j++) {
+      if (t[j] === q[acc.length]) walk(j + 1, [...acc, j])
+    }
+  }
+  walk(0, [])
+  return out
+}
+
+function paths(prefix: string): string[] {
+  return Array.from({ length: 5000 }, (_, i) => `${prefix}project-${i % 41}/notes/${i % 13}/Meeting notes ${i}.md`)
+}
+
+/** Best of five runs of each query after a warm-up, to be robust to a busy machine. */
+function slowestBestRun(items: readonly string[], queries: readonly string[]): { query: string; ms: number } {
+  queries.forEach((q) => fuzzyFilter(q, items, (s) => s)) // warm up the JIT
+  return queries
+    .map((query) => {
+      const runs = Array.from({ length: 5 }, () => {
+        const started = performance.now()
+        fuzzyFilter(query, items, (s) => s)
+        return performance.now() - started
+      })
+      return { query, ms: Math.min(...runs) }
+    })
+    .reduce((a, b) => (b.ms > a.ms ? b : a))
 }
 
 describe('fuzzyMatch basics', () => {
@@ -243,6 +294,74 @@ describe('fuzzyMatch on large inputs', () => {
   })
 })
 
+describe('fuzzyMatch optimality', () => {
+  it('finds the best alignment where a weaker path has the stronger run start', () => {
+    // Arrange: a greedy "best path per cell" DP scores this 121
+    const query = '_aBAA'
+    const text = 'aab_.1AaBAA-'
+
+    // Act
+    const m = fuzzyMatch(query, text)
+
+    // Assert
+    assert.equal(m?.score, 131)
+    assert.deepEqual(m?.positions, [3, 6, 8, 9, 10])
+  })
+
+  it('always scores as well as the best alignment found by brute force', () => {
+    // Arrange
+    const next = seededRandom(20261018)
+    let compared = 0
+
+    for (let c = 0; c < 4000; c++) {
+      const text = randomString(next, 'aAbB_-./1 ', 12)
+      const query = randomString(next, 'aAbB_-./1', 5)
+
+      // Act
+      const m = fuzzyMatch(query, text)
+      const scores = allAlignments(query, text).map((pos) => scoreAlignment(query, text, pos) ?? -Infinity)
+
+      // Assert
+      if (scores.length === 0) {
+        assert.equal(m, null, `"${query}" in "${text}"`)
+        continue
+      }
+      compared++
+      assert.ok(m, `"${query}" in "${text}"`)
+      assert.equal(m.score, Math.max(...scores), `"${query}" in "${text}"`)
+      assert.equal(scoreAlignment(query, text, m.positions), m.score)
+    }
+    assert.ok(compared > 500, `only ${compared} matching cases`)
+  })
+})
+
+describe('scoreAlignment', () => {
+  it('gives the score fuzzyMatch reports for its own alignment', () => {
+    // Arrange
+    const m = fuzzyMatch('rdme', 'docs/README.md')!
+
+    // Act
+    const s = scoreAlignment('rdme', 'docs/README.md', m.positions)
+
+    // Assert
+    assert.equal(s, m.score)
+  })
+
+  it('returns null for positions that are not an alignment', () => {
+    assert.equal(scoreAlignment('ab', 'ab', [1, 0]), null)
+    assert.equal(scoreAlignment('ab', 'ab', [0]), null)
+    assert.equal(scoreAlignment('ab', 'ab', [0, 0]), null)
+    assert.equal(scoreAlignment('ab', 'ab', [0, 5]), null)
+    assert.equal(scoreAlignment('ab', 'xb', [0, 1]), null)
+  })
+
+  it('accepts UTF-16 positions after astral characters and an empty query', () => {
+    assert.equal(scoreAlignment('ab', '😀 ab', [3, 4]), fuzzyMatch('ab', '😀 ab')?.score)
+    assert.equal(scoreAlignment('ab', '😀 ab', [2, 3]), null)
+    assert.equal(scoreAlignment('  ', 'abc', []), 0)
+  })
+})
+
 describe('fuzzyFilter', () => {
   const files = ['notes.md', 'readme.md', 'docs/notes-old.md', 'todo.md', 'archive/n-o-t-e-s.md']
 
@@ -310,21 +429,36 @@ describe('fuzzyFilter', () => {
 
   it('filters 5,000 paths well within a frame', () => {
     // Arrange
-    const items = Array.from({ length: 5000 }, (_, i) => `project-${i % 41}/notes/${i % 13}/Meeting notes ${i}.md`)
-    const queries = ['m', 'mtg', 'notes meeting', 'p7/n', 'zzz']
-    queries.forEach((q) => fuzzyFilter(q, items, (s) => s)) // warm up the JIT
+    const items = paths('')
 
-    for (const query of queries) {
-      // Act: best of five runs, to be robust to a busy machine
-      const runs = Array.from({ length: 5 }, () => {
-        const started = performance.now()
-        fuzzyFilter(query, items, (s) => s)
-        return performance.now() - started
-      })
-      const best = Math.min(...runs)
+    // Act
+    const slowest = slowestBestRun(items, ['m', 'mtg', 'notes meeting', 'p7/n', 'zzz'])
+
+    // Assert (target is < 10 ms; the bound is generous for slow CI machines)
+    assert.ok(slowest.ms < 40, `"${slowest.query}" took ${slowest.ms.toFixed(2)} ms`)
+  })
+
+  it('filters 5,000 paths with accented and CJK folders just as fast', () => {
+    for (const prefix of ['C:/Users/José Müller/Documents/', 'C:/Users/田中/ドキュメント/']) {
+      // Arrange
+      const items = paths(prefix)
+
+      // Act
+      const slowest = slowestBestRun(items, ['m', 'mtg', 'notes meeting', 'jose', 'zzz'])
 
       // Assert (target is < 10 ms; the bound is generous for slow CI machines)
-      assert.ok(best < 40, `"${query}" took ${best.toFixed(2)} ms`)
+      assert.ok(slowest.ms < 40, `${prefix} "${slowest.query}" took ${slowest.ms.toFixed(2)} ms`)
     }
+  })
+
+  it('still finds accented names among non-ASCII paths', () => {
+    // Arrange
+    const items = ['C:/Users/田中/メモ/Résumé.md', 'C:/Users/田中/メモ/notes.md']
+
+    // Act
+    const found = order('resume', items)
+
+    // Assert
+    assert.deepEqual(found, ['C:/Users/田中/メモ/Résumé.md'])
   })
 })

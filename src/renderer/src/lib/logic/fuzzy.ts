@@ -1,5 +1,5 @@
 // Fuzzy matching for Quick Open and the command palette. An fzf-style scorer: the best
-// alignment of the query in the text is found with a small dynamic program, and every
+// alignment of the query in the text is found with an exact dynamic program, and every
 // candidate alignment is scored by one function so the DP and the fallbacks agree.
 
 export interface FuzzyMatch {
@@ -44,8 +44,6 @@ const UPPER = 4
 const DIGIT = 5
 const LETTER = 6
 
-const DOT = 46
-const ASCII_ONLY = /^[\x00-\x7f]*$/
 const COMBINING_MARKS = /[\u0300-\u036f]/g
 const WHITESPACE = /\s/
 
@@ -68,34 +66,40 @@ interface Prepared {
 let textCap = 0
 let foldedBuf = new Int32Array(0)
 let offsetBuf = new Int32Array(0)
-let classBuf = new Int32Array(0)
 let bonusBuf = new Int32Array(0)
 let cellCap = 0
-let scoreBuf = new Int32Array(0)
-let prevBuf = new Int32Array(0)
+/** Best score of an alignment of query[0..i] whose last match is at text column j. */
+let endBuf = new Int32Array(0)
+/** Column where that alignment's final run starts. */
 let runBuf = new Int32Array(0)
+/** For a run starting at (i, j): the column of query[i - 1]'s match before the gap. */
+let prevBuf = new Int32Array(0)
+let bandCap = 0
+let loBuf = new Int32Array(0)
+let hiBuf = new Int32Array(0)
 
 function ensureTextCapacity(length: number): void {
   if (length <= textCap) return
   textCap = Math.max(length, textCap * 2, 256)
   foldedBuf = new Int32Array(textCap)
   offsetBuf = new Int32Array(textCap)
-  classBuf = new Int32Array(textCap)
   bonusBuf = new Int32Array(textCap)
 }
 
 function ensureCellCapacity(cells: number): void {
   if (cells <= cellCap) return
   cellCap = Math.max(cells, cellCap * 2, 4096)
-  scoreBuf = new Int32Array(cellCap)
-  prevBuf = new Int32Array(cellCap)
+  endBuf = new Int32Array(cellCap)
   runBuf = new Int32Array(cellCap)
+  prevBuf = new Int32Array(cellCap)
 }
 
+// ---------------------------------------------------------------------------------------
+// Characters
+
 /** Lower-case one character and drop its accents ("É" → "e"), as a single code point. */
-function foldCode(ch: string): number {
+function foldChar(ch: string): number {
   const code = ch.codePointAt(0) ?? 0
-  if (code < 128) return code >= 65 && code <= 90 ? code + 32 : code
   const lower = ch.toLowerCase()
   const base = lower.normalize('NFD').replace(COMBINING_MARKS, '')
   const pick = [...base].length === 1 ? base : [...lower].length === 1 ? lower : ch
@@ -111,15 +115,49 @@ function classOfAscii(code: number): number {
   return PUNCTUATION
 }
 
-function classOf(ch: string): number {
-  const code = ch.codePointAt(0) ?? 0
-  if (code < 128) return classOfAscii(code)
+function classOfChar(ch: string): number {
   if (WHITESPACE.test(ch)) return WHITE
   if (/\p{N}/u.test(ch)) return DIGIT
   if (ch.toLowerCase() !== ch) return UPPER
   if (ch.toUpperCase() !== ch) return LOWER
   return /[\p{L}\p{M}]/u.test(ch) ? LETTER : PUNCTUATION
 }
+
+// Non-ASCII folding and classing cost a normalize() and several regexes, so each code
+// point is worked out once. Real file lists use few distinct characters; the cap only
+// guards against a pathological list.
+const MAX_CACHED_CODES = 8192
+const foldCache = new Map<number, number>()
+const classCache = new Map<number, number>()
+
+function cachedOf(cache: Map<number, number>, code: number, compute: (ch: string) => number): number {
+  const hit = cache.get(code)
+  if (hit !== undefined) return hit
+  if (cache.size >= MAX_CACHED_CODES) cache.clear()
+  const value = compute(String.fromCodePoint(code))
+  cache.set(code, value)
+  return value
+}
+
+function foldCode(code: number): number {
+  if (code < 128) return code >= 65 && code <= 90 ? code + 32 : code
+  return cachedOf(foldCache, code, foldChar)
+}
+
+function classOfCode(code: number): number {
+  return code < 128 ? classOfAscii(code) : cachedOf(classCache, code, classOfChar)
+}
+
+/** The code point at UTF-16 index `i` (a lone surrogate stands for itself). */
+function codeAt(text: string, i: number): number {
+  const code = text.charCodeAt(i)
+  if (code < 0xd800 || code > 0xdbff || i + 1 >= text.length) return code
+  const low = text.charCodeAt(i + 1)
+  return low >= 0xdc00 && low <= 0xdfff ? (code - 0xd800) * 0x400 + (low - 0xdc00) + 0x10000 : code
+}
+
+// ---------------------------------------------------------------------------------------
+// Preparing text and query
 
 /** Bonus for matching a character of class `cls` that follows one of class `prev`. */
 function bonusFor(prev: number, cls: number): number {
@@ -132,56 +170,54 @@ function bonusFor(prev: number, cls: number): number {
   return 0
 }
 
-/** Start of the last path segment, ignoring trailing separators ("docs/" → "docs"). */
-function baseNameStart(length: number): number {
-  let end = length
-  while (end > 0 && classBuf[end - 1] === SEPARATOR) end--
-  for (let i = end - 1; i >= 0; i--) {
-    if (classBuf[i] === SEPARATOR) return i + 1
-  }
-  return 0
+const CLASS_COUNT = 7
+const ASCII_CLASS = Int32Array.from({ length: 128 }, (_, code) => classOfAscii(code))
+/** bonusFor(prev, cls) at [prev * CLASS_COUNT + cls], so the hot loop doesn't branch. */
+const BONUS_TABLE = Int32Array.from({ length: CLASS_COUNT * CLASS_COUNT }, (_, k) =>
+  bonusFor(Math.floor(k / CLASS_COUNT), k % CLASS_COUNT))
+
+/** UTF-16 index where the last path segment starts, ignoring trailing separators
+ *  ("a/docs/" → 2); 0 when the text has no path. */
+function baseNameOffset(text: string): number {
+  let end = text.length
+  while (end > 0 && (text.charCodeAt(end - 1) === 47 || text.charCodeAt(end - 1) === 92)) end--
+  if (end === 0) return 0
+  return Math.max(text.lastIndexOf('/', end - 1), text.lastIndexOf('\\', end - 1)) + 1
 }
 
-/** Bonuses, base name and extension, once folded/offsets/classes are filled in. */
-function finishPrepare(length: number): Prepared {
-  const baseStart = baseNameStart(length)
-  for (let i = 0; i < length; i++) {
-    const b = bonusFor(i === 0 ? WHITE : classBuf[i - 1], classBuf[i])
-    bonusBuf[i] = i >= baseStart ? b + BONUS_BASENAME : b
-  }
-  let extStart = length
-  for (let i = length - 1; i > baseStart; i--) {
-    if (foldedBuf[i] === DOT) {
-      extStart = i
-      break
+/** Fold and score every character in one pass: this runs for every candidate item. */
+function prepare(text: string): Prepared {
+  ensureTextCapacity(text.length)
+  // Locals, not module bindings, in the hot loops: V8 re-checks a module `let` per access.
+  const folded = foldedBuf
+  const offsets = offsetBuf
+  const bonus = bonusBuf
+  const baseOffset = baseNameOffset(text)
+  const dot = text.lastIndexOf('.')
+  const extOffset = dot > baseOffset ? dot : -1
+  let length = 0
+  let baseStart = 0
+  let extStart = -1
+  let prevClass = WHITE
+  for (let i = 0; i < text.length; length++) {
+    let code = text.charCodeAt(i)
+    let cls: number
+    if (code < 128) {
+      cls = ASCII_CLASS[code]
+      folded[length] = code >= 65 && code <= 90 ? code + 32 : code
+    } else {
+      code = codeAt(text, i)
+      cls = classOfCode(code)
+      folded[length] = foldCode(code)
     }
+    if (i === baseOffset) baseStart = length
+    if (i === extOffset) extStart = length
+    offsets[length] = i
+    bonus[length] = BONUS_TABLE[prevClass * CLASS_COUNT + cls] + (i >= baseOffset ? BONUS_BASENAME : 0)
+    prevClass = cls
+    i += code > 0xffff ? 2 : 1
   }
-  return { length, folded: foldedBuf, offsets: offsetBuf, bonus: bonusBuf, baseStart, extStart }
-}
-
-function prepareAscii(text: string): Prepared {
-  const length = text.length
-  ensureTextCapacity(length)
-  for (let i = 0; i < length; i++) {
-    const code = text.charCodeAt(i)
-    foldedBuf[i] = code >= 65 && code <= 90 ? code + 32 : code
-    offsetBuf[i] = i
-    classBuf[i] = classOfAscii(code)
-  }
-  return finishPrepare(length)
-}
-
-function prepareUnicode(text: string): Prepared {
-  const chars = [...text]
-  ensureTextCapacity(chars.length)
-  let offset = 0
-  chars.forEach((ch, i) => {
-    foldedBuf[i] = foldCode(ch)
-    offsetBuf[i] = offset
-    classBuf[i] = classOf(ch)
-    offset += ch.length
-  })
-  return finishPrepare(chars.length)
+  return { length, folded, offsets, bonus, baseStart, extStart: extStart < 0 ? length : extStart }
 }
 
 /** Query characters to look for, folded, with whitespace dropped so "new file" finds
@@ -189,30 +225,38 @@ function prepareUnicode(text: string): Prepared {
 function prepareQuery(query: string): number[] {
   const out: number[] = []
   for (const ch of query) {
-    if (!WHITESPACE.test(ch)) out.push(foldCode(ch))
+    if (!WHITESPACE.test(ch)) out.push(foldCode(ch.codePointAt(0) ?? 0))
   }
   return out
 }
 
-/** Cheap reject on the raw string before any work (ASCII text only). */
-function asciiSubsequence(q: readonly number[], text: string): boolean {
-  let ti = 0
-  for (const want of q) {
-    for (;;) {
-      if (ti >= text.length) return false
-      const code = text.charCodeAt(ti++)
-      if ((code >= 65 && code <= 90 ? code + 32 : code) === want) break
-    }
+/** Cheap reject on the raw string before any other work: most items don't match. */
+function isSubsequence(q: readonly number[], text: string): boolean {
+  let qi = 0
+  for (let i = 0; i < text.length && qi < q.length;) {
+    const code = codeAt(text, i)
+    if (foldCode(code) === q[qi]) qi++
+    i += code > 0xffff ? 2 : 1
   }
-  return true
+  return qi === q.length
+}
+
+interface Band {
+  lo: Int32Array
+  hi: Int32Array
 }
 
 /** Leftmost (`lo`) and rightmost (`hi`) text index each query character can take in any
  *  alignment, or null when the query isn't a subsequence. Bounds the DP to a band. */
-function bandOf(q: readonly number[], p: Prepared): { lo: number[]; hi: number[] } | null {
+function bandOf(q: readonly number[], p: Prepared): Band | null {
   const n = q.length
-  const lo = new Array<number>(n)
-  const hi = new Array<number>(n)
+  if (n > bandCap) {
+    bandCap = Math.max(n, bandCap * 2, 64)
+    loBuf = new Int32Array(bandCap)
+    hiBuf = new Int32Array(bandCap)
+  }
+  const lo = loBuf
+  const hi = hiBuf
   let j = 0
   for (let i = 0; i < n; i++) {
     while (j < p.length && p.folded[j] !== q[i]) j++
@@ -227,121 +271,140 @@ function bandOf(q: readonly number[], p: Prepared): { lo: number[]; hi: number[]
   return { lo, hi }
 }
 
+// ---------------------------------------------------------------------------------------
+// Scoring and alignment
+
 function leadingPenalty(j: number, baseStart: number): number {
   const from = j >= baseStart ? baseStart : 0
   return Math.min(MAX_LEADING_GAP_PENALTY, (j - from) * LEADING_GAP_PENALTY)
+}
+
+function firstScore(j: number, p: Prepared): number {
+  return SCORE_MATCH + p.bonus[j] * FIRST_CHAR_MULTIPLIER - leadingPenalty(j, p.baseStart)
+}
+
+/** A run keeps the bonus of the character it started on ("rea" at a word start). */
+function runFloor(start: number, p: Prepared): number {
+  return Math.max(p.bonus[start], BONUS_CONSECUTIVE)
 }
 
 /** The score of one alignment (character indexes, ascending). The DP maximizes exactly
  *  this, so other candidate alignments can be compared fairly. */
 function scorePositions(positions: readonly number[], p: Prepared): number {
   let score = 0
-  let runStart = 0
+  let floor = 0
   for (let k = 0; k < positions.length; k++) {
     const j = positions[k]
     if (k === 0) {
-      score += SCORE_MATCH + p.bonus[j] * FIRST_CHAR_MULTIPLIER - leadingPenalty(j, p.baseStart)
-      runStart = j
+      score += firstScore(j, p)
+      floor = runFloor(j, p)
     } else if (j === positions[k - 1] + 1) {
-      // A run keeps the bonus of the character it started on ("rea" at a word start).
-      score += SCORE_MATCH + Math.max(p.bonus[j], p.bonus[runStart], BONUS_CONSECUTIVE)
+      score += SCORE_MATCH + Math.max(p.bonus[j], floor)
     } else {
       const gap = j - positions[k - 1] - 1
       score += SCORE_MATCH + p.bonus[j] - GAP_START - GAP_EXTENSION * (gap - 1)
-      runStart = j
+      floor = runFloor(j, p)
     }
   }
   return score
 }
 
-/** Best alignment by dynamic programming over (query char, text char) with affine gaps.
- *  Row i only covers text indexes lo[i]..hi[i]; cells outside a row's band are never read. */
-function alignDp(q: readonly number[], p: Prepared, lo: readonly number[], hi: readonly number[]): number[] {
+/** A run of matches starting at (i, j) with `score` so far: record it as the best
+ *  alignment ending there, then extend it down its diagonal while the characters keep
+ *  matching, offering each cell "this run, this long". Runs are short, so this is cheap. */
+function startRun(q: readonly number[], p: Prepared, i: number, j: number, score: number, hi: Int32Array): void {
+  // Locals, not module bindings, in the hot loops: V8 re-checks a module `let` per access.
+  const end = endBuf
+  const run = runBuf
+  const { folded, bonus, length: m } = p
+  let cell = i * m + j
+  // Strictly better only: on a tie the longer run pushed from an earlier row wins.
+  if (score > end[cell]) {
+    end[cell] = score
+    run[cell] = j
+  }
+  const floor = runFloor(j, p)
+  let total = score
+  for (let t = 1; i + t < q.length && j + t <= hi[i + t] && folded[j + t] === q[i + t]; t++) {
+    total += SCORE_MATCH + Math.max(bonus[j + t], floor)
+    cell += m + 1
+    if (total > end[cell]) {
+      end[cell] = total
+      run[cell] = j
+    }
+  }
+}
+
+/** Row i: every place query[i] can start a run, either as the first character or after a
+ *  gap of at least one character from row i - 1's best alignments (kept in `prevBuf`). */
+function fillRow(q: readonly number[], p: Prepared, i: number, lo: Int32Array, hi: Int32Array): void {
+  const end = endBuf
+  const prev = prevBuf
+  const { folded, bonus, length: m } = p
+  const want = q[i]
+  if (i === 0) {
+    for (let j = lo[0]; j <= hi[0]; j++) {
+      if (folded[j] === want) startRun(q, p, 0, j, firstScore(j, p), hi)
+    }
+    return
+  }
+  const row = i * m
+  const up = row - m
+  const upHi = hi[i - 1]
+  // Best "earlier match minus the gap so far", for gaps of at least one character.
+  let carry = NONE
+  let carryFrom = -1
+  for (let j = lo[i - 1] + 2; j <= hi[i]; j++) {
+    carry -= GAP_EXTENSION
+    const k = j - 2
+    if (k <= upHi && end[up + k] > NONE && end[up + k] - GAP_START > carry) {
+      carry = end[up + k] - GAP_START
+      carryFrom = k
+    }
+    if (j < lo[i] || carryFrom < 0 || folded[j] !== want) continue
+    prev[row + j] = carryFrom
+    startRun(q, p, i, j, carry + SCORE_MATCH + bonus[j], hi)
+  }
+}
+
+/** Best alignment by an exact dynamic program over (query char, text char). A run's
+ *  score depends on where it started, so cells hold "best alignment ending here" and
+ *  every run start pushes its run forward; rows only cover the band lo[i]..hi[i]. */
+function alignDp(q: readonly number[], p: Prepared, lo: Int32Array, hi: Int32Array): number[] {
   const n = q.length
   const m = p.length
   ensureCellCapacity(n * m)
-  const score = scoreBuf
-  const prev = prevBuf
-  const run = runBuf
-  for (let j = lo[0]; j <= hi[0]; j++) {
-    score[j] = p.folded[j] === q[0]
-      ? SCORE_MATCH + p.bonus[j] * FIRST_CHAR_MULTIPLIER - leadingPenalty(j, p.baseStart)
-      : NONE
-    run[j] = j
+  // Every row is reset first: runs from earlier rows write into later ones. (A plain loop:
+  // bands are short and fill() costs more per call than it saves.)
+  const end = endBuf
+  for (let i = 0; i < n; i++) {
+    for (let cell = i * m + lo[i], last = i * m + hi[i]; cell <= last; cell++) end[cell] = NONE
   }
-  for (let i = 1; i < n; i++) {
-    const row = i * m
-    const up = row - m
-    const want = q[i]
-    const upLo = lo[i - 1]
-    const upHi = hi[i - 1]
-    // Best "earlier match minus the gap so far", for gaps of at least one character.
-    let carry = NONE
-    let carryFrom = -1
-    for (let j = upLo + 2; j <= hi[i]; j++) {
-      carry -= GAP_EXTENSION
-      const k = j - 2
-      if (k <= upHi && score[up + k] > NONE && score[up + k] - GAP_START > carry) {
-        carry = score[up + k] - GAP_START
-        carryFrom = k
-      }
-      if (j < lo[i]) continue
-      score[row + j] = NONE
-      if (p.folded[j] !== want) continue
-      const k1 = j - 1
-      const diag = k1 >= upLo && k1 <= upHi ? score[up + k1] : NONE
-      const viaRun = diag > NONE
-        ? diag + SCORE_MATCH + Math.max(p.bonus[j], p.bonus[run[up + k1]], BONUS_CONSECUTIVE)
-        : NONE
-      const viaGap = carryFrom >= 0 ? carry + SCORE_MATCH + p.bonus[j] : NONE
-      if (viaRun > NONE && viaRun >= viaGap) {
-        score[row + j] = viaRun
-        prev[row + j] = k1
-        run[row + j] = run[up + k1]
-      } else if (viaGap > NONE) {
-        score[row + j] = viaGap
-        prev[row + j] = carryFrom
-        run[row + j] = j
-      }
-    }
-    // The first band cell may sit right after the previous band's start, before the loop.
-    if (lo[i] === upLo + 1) seedRunStart(q, p, i, lo[i])
-  }
+  for (let i = 0; i < n; i++) fillRow(q, p, i, lo, hi)
   return backtrack(n, m, lo[n - 1], hi[n - 1])
-}
-
-/** Cell (i, upLo+1) can only be reached by a run from (i-1, upLo); the gap loop starts one
- *  column later, so fill it here. */
-function seedRunStart(q: readonly number[], p: Prepared, i: number, j: number): void {
-  const m = p.length
-  const row = i * m
-  const up = row - m
-  scoreBuf[row + j] = NONE
-  if (p.folded[j] !== q[i] || scoreBuf[up + j - 1] <= NONE) return
-  const start = runBuf[up + j - 1]
-  scoreBuf[row + j] = scoreBuf[up + j - 1] + SCORE_MATCH + Math.max(p.bonus[j], p.bonus[start], BONUS_CONSECUTIVE)
-  prevBuf[row + j] = j - 1
-  runBuf[row + j] = start
 }
 
 function backtrack(n: number, m: number, from: number, to: number): number[] {
   const last = (n - 1) * m
-  let bestJ = from
-  for (let j = from; j <= to; j++) {
-    if (scoreBuf[last + j] > scoreBuf[last + bestJ]) bestJ = j
+  let j = from
+  for (let k = from; k <= to; k++) {
+    if (endBuf[last + k] > endBuf[last + j]) j = k
   }
   const positions = new Array<number>(n)
-  let j = bestJ
-  for (let i = n - 1; i >= 0; i--) {
-    positions[i] = j
-    j = prevBuf[i * m + j]
+  let i = n - 1
+  while (i >= 0) {
+    const start = runBuf[i * m + j]
+    const startRow = i - (j - start)
+    for (let r = i; r >= startRow; r--) positions[r] = start + (r - startRow)
+    j = prevBuf[startRow * m + start]
+    i = startRow - 1
   }
   return positions
 }
 
 /** Leftmost match pulled right-to-left as tight as possible (fzf v1), for huge inputs. */
-function alignGreedy(q: readonly number[], p: Prepared, lo: readonly number[]): number[] {
-  let end = lo[lo.length - 1]
+function alignGreedy(q: readonly number[], p: Prepared, lo: Int32Array): number[] {
+  let end = lo[q.length - 1]
   const tight = new Array<number>(q.length)
   for (let i = q.length - 1; i >= 0; i--) {
     while (p.folded[end] !== q[i]) end--
@@ -373,15 +436,15 @@ function totalScore(positions: readonly number[], p: Prepared): number {
 }
 
 function matchPrepared(q: readonly number[], text: string): FuzzyMatch | null {
-  if (q.length > text.length) return null
-  const ascii = ASCII_ONLY.test(text)
-  if (ascii && !asciiSubsequence(q, text)) return null
-  const p = ascii ? prepareAscii(text) : prepareUnicode(text)
+  if (q.length > text.length || !isSubsequence(q, text)) return null
+  const p = prepare(text)
   const band = bandOf(q, p)
   if (!band) return null
   const best = q.length * p.length > MAX_DP_CELLS
     ? alignGreedy(q, p, band.lo)
     : alignDp(q, p, band.lo, band.hi)
+  // The whole-query bonuses only reward contiguous alignments at these two starts, so
+  // checking them next to the DP's best gives the true optimum of `totalScore`.
   let top = { score: totalScore(best, p), positions: best }
   for (const start of [p.baseStart, 0]) {
     const positions = contiguousAt(q, p, start)
@@ -392,16 +455,36 @@ function matchPrepared(q: readonly number[], text: string): FuzzyMatch | null {
   return { score: top.score, positions: top.positions.map((i) => p.offsets[i]) }
 }
 
+// ---------------------------------------------------------------------------------------
+// Public API
+
 /** Case-insensitive subsequence match of `query` in `text`, or null when it doesn't match.
  *  Rewards consecutive characters, word starts (after space, -, _, /, \, ., or a
  *  lower→upper case change) and an early first match. An empty query matches with score 0.
  *  Also prefers matches in the base name of a path, the query typed as the start of the
  *  name, and the exact name. Accents fold ("cafe" finds "Café") and whitespace in the query
- *  is ignored. Positions are UTF-16 indexes into `text`, one per non-space query character. */
+ *  is ignored. Positions are UTF-16 indexes into `text`, one per non-space query character.
+ *  The best-scoring alignment is always found, except for texts too long for the DP
+ *  (query × text above 120,000 characters), which get a tight greedy alignment. */
 export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
   const q = prepareQuery(query)
   if (q.length === 0) return { score: 0, positions: [] }
   return matchPrepared(q, text)
+}
+
+/** The score `fuzzyMatch` gives one particular alignment of `query` in `text` (UTF-16
+ *  `positions`, ascending, one per non-space query character), or null when `positions`
+ *  isn't an alignment. This is the function the matcher maximizes; useful for tests. */
+export function scoreAlignment(query: string, text: string, positions: readonly number[]): number | null {
+  const q = prepareQuery(query)
+  if (q.length === 0) return positions.length === 0 ? 0 : null
+  if (positions.length !== q.length) return null
+  const p = prepare(text)
+  const byOffset = new Map<number, number>()
+  for (let i = 0; i < p.length; i++) byOffset.set(p.offsets[i], i)
+  const indexes = positions.map((offset) => byOffset.get(offset) ?? -1)
+  const valid = indexes.every((j, k) => j >= 0 && p.folded[j] === q[k] && (k === 0 || j > indexes[k - 1]))
+  return valid ? totalScore(indexes, p) : null
 }
 
 export interface FuzzyResult<T> {
