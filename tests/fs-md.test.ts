@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, describe, it } from 'node:test'
-import { isNetworkPath, readImageDataUrl, saveMdFile } from '../src/main/fs-md.ts'
+import { isNetworkPath, isWithin, readImageDataUrl, saveMdFile } from '../src/main/fs-md.ts'
 
 // 1x1 transparent PNG
 const PNG = Buffer.from(
@@ -60,6 +60,13 @@ describe('readImageDataUrl', () => {
     assert.equal(await readImageDataUrl(doc(), 'file:////attacker.example/s/a.png', [root]), null)
   })
 
+  it('serves images in a folder whose name starts with ".."', async () => {
+    await mkdir(join(root, '..notes'), { recursive: true })
+    await writeFile(join(root, '..notes', 'pic.png'), PNG)
+    const url = await readImageDataUrl(doc(), '..notes/pic.png', [root])
+    assert.ok(url?.startsWith('data:image/png;base64,'))
+  })
+
   it('rejects ../ traversal out of the allowed root', async () => {
     const escape = `../${outside.split(/[\\/]/).pop()}/secret.png`
     assert.equal(await readImageDataUrl(doc(), escape, [root]), null)
@@ -77,6 +84,16 @@ describe('readImageDataUrl', () => {
   it('leaves remote and data URLs to the renderer', async () => {
     assert.equal(await readImageDataUrl(doc(), 'https://example.com/a.png', [root]), null)
     assert.equal(await readImageDataUrl(doc(), 'data:image/png;base64,AAAA', [root]), null)
+  })
+})
+
+describe('isWithin', () => {
+  it('treats only a real ".." step as leaving the folder', () => {
+    const base = join(root, 'ws')
+    assert.equal(isWithin(base, base), true)
+    assert.equal(isWithin(base, join(base, '..notes', 'a.png')), true)
+    assert.equal(isWithin(base, join(base, '..', 'a.png')), false)
+    assert.equal(isWithin(base, root), false)
   })
 })
 

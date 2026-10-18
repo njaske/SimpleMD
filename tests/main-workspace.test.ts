@@ -25,6 +25,7 @@ const access = await import('../src/main/access.ts')
 const grants = await import('../src/main/grant-store.ts')
 const ops = await import('../src/main/workspace-ops.ts')
 const recovery = await import('../src/main/recovery-store.ts')
+const fsMd = await import('../src/main/fs-md.ts')
 
 type Store = import('../src/main/grant-store.ts').SettingsStore & { saved: Partial<Settings>[] }
 
@@ -277,7 +278,7 @@ describe('grant-store', () => {
 })
 
 describe('recoveryLoader', () => {
-  it('re-grants stored paths that still exist, on the first load only', async () => {
+  it('re-grants every stored path on the first load only', async () => {
     const dir = join(loose, 'recovery')
     const kept = join(loose, 'kept.md')
     const gone = join(loose, 'gone.md')
@@ -289,12 +290,26 @@ describe('recoveryLoader', () => {
     const first = await load()
     assert.equal(first.length, 2)
     assert.equal(access.isApprovedFile(kept), true)
-    assert.equal(access.isApprovedFile(gone), false)
+    assert.equal(access.isApprovedFile(gone), true)
 
     // Revoked during the session (trashed, renamed away): a later load can't undo that.
     access.revokeFile(kept)
     await load()
     assert.equal(access.isApprovedFile(kept), false)
   })
-})
 
+  it('lets a recovered file that was deleted on disk be saved back where it was', async () => {
+    const dir = join(loose, 'recovery-deleted')
+    const deleted = join(loose, 'deleted.md')
+    await writeFile(deleted, 'before the crash')
+    const entry = { id: deleted, path: deleted, title: 'deleted.md', content: 'unsaved', savedAt: 1 }
+    await recovery.saveRecovery(dir, [entry], () => true)
+    await rm(deleted)
+
+    const [restored] = await ops.recoveryLoader(() => dir)()
+    assert.equal(restored.path, deleted)
+    assert.equal(access.isApproved(deleted), true)
+    await fsMd.saveMdFile(deleted, restored.content)
+    assert.equal(await readFile(deleted, 'utf8'), 'unsaved')
+  })
+})

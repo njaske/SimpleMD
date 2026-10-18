@@ -64,11 +64,22 @@ type GuardedWindow = BrowserWindow & {
 // Set while the app is quitting, so a close deferred for unsaved edits can
 // finish the quit once the user has answered (macOS would otherwise stay open).
 let quitting = false
+// True for the final app.quit() that follows the settings flush, so before-quit
+// lets it through. Cleared when a window defers that quit, so the next quit
+// flushes again.
+let settingsFlushed = false
 
 /** Quit once the last settings write (tabs, theme, ...) has reached disk. One
  *  macrotask first, so a save the closing window just sent is queued. */
 function quitAfterSettingsFlush(): void {
-  setTimeout(() => void settingsWritten().finally(() => app.quit()), 0)
+  setTimeout(
+    () =>
+      void settingsWritten().finally(() => {
+        settingsFlushed = true
+        app.quit()
+      }),
+    0
+  )
 }
 
 function guardUnsavedClose(win: GuardedWindow): void {
@@ -81,6 +92,7 @@ function guardUnsavedClose(win: GuardedWindow): void {
     event.preventDefault()
     win._quitAfterClose = quitting
     quitting = false
+    settingsFlushed = false
     win.webContents.send('app:request-close')
   })
   win.on('closed', () => {
@@ -144,11 +156,24 @@ async function createWindow(): Promise<BrowserWindow> {
   return win
 }
 
-/** The window to show shell-opened files in: the existing one, brought to the
- *  front, or a new one (macOS keeps running with no window open). */
-async function frontWindow(): Promise<BrowserWindow> {
+// The window being created, if any. createWindow awaits the settings before the
+// window exists, so callers in that gap (one open-file event per file, quick Dock
+// clicks) share it instead of each opening another window.
+let creatingWindow: Promise<BrowserWindow> | null = null
+
+/** The app's window, created when there is none (macOS keeps running without one). */
+function ensureWindow(): Promise<BrowserWindow> {
   const existing = BrowserWindow.getAllWindows()[0]
-  if (!existing) return createWindow()
+  if (existing) return Promise.resolve(existing)
+  creatingWindow ??= createWindow().finally(() => {
+    creatingWindow = null
+  })
+  return creatingWindow
+}
+
+/** The window to show shell-opened files in, brought to the front. */
+async function frontWindow(): Promise<BrowserWindow> {
+  const existing = await ensureWindow()
   if (existing.isMinimized()) existing.restore()
   existing.focus()
   return existing
@@ -211,14 +236,12 @@ if (!gotLock) {
     denyPermissionRequests()
     configureSpellcheck()
     registerIpc()
-    const win = await createWindow()
+    const win = await ensureWindow()
     launchPrepared = true
     // Files that arrived while the launch was being prepared.
     if (earlyOpenFiles.length) void openFromSecondInstance(earlyOpenFiles.splice(0), process.cwd(), win)
 
-    app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) void createWindow()
-    })
+    app.on('activate', () => void ensureWindow())
     nativeTheme.on('updated', () => void syncWindowBackground())
   })
 
@@ -227,11 +250,9 @@ if (!gotLock) {
   })
 
   // Let the last settings write (tabs, theme, ...) reach disk before exiting.
-  let settingsFlushed = false
   app.on('before-quit', (event) => {
     quitting = true
     if (settingsFlushed) return
-    settingsFlushed = true
     event.preventDefault()
     quitAfterSettingsFlush()
   })

@@ -32,15 +32,6 @@ async function isDirectory(path: string): Promise<boolean> {
   }
 }
 
-async function exists(path: string): Promise<boolean> {
-  try {
-    await fs.lstat(path)
-    return true
-  } catch {
-    return false
-  }
-}
-
 /** A workspace folder new files and folders may be created in (never next to a
  *  loose file: those grants cover one file, not its folder). */
 export async function assertWorkspaceFolder(dir: unknown): Promise<string> {
@@ -111,17 +102,19 @@ export async function openRecentFolder(store: SettingsStore, path: unknown): Pro
 }
 
 /** `recovery:load`. The main process wrote these paths itself after an access
- *  check, so the first load of a run re-grants the ones that still exist. Later
- *  loads don't: a grant revoked meanwhile (trash, rename) must stay revoked. */
+ *  check, so the first load of a run re-grants every one of them: a recovered file
+ *  that was deleted or moved since can then be saved back where it was (the atomic
+ *  save recreates it). Later loads don't: a grant revoked meanwhile (trash,
+ *  rename) must stay revoked. */
 export function recoveryLoader(dir: () => string): () => Promise<RecoveryEntry[]> {
   let regranted = false
   return async () => {
     const entries = await loadRecovery(dir())
     if (regranted) return entries
     regranted = true
-    const paths = entries.flatMap((entry) => (entry.path ? [entry.path] : []))
-    const present = await Promise.all(paths.map(exists))
-    paths.filter((_, i) => present[i]).forEach(approveFile)
+    entries.forEach((entry) => {
+      if (entry.path) approveFile(entry.path)
+    })
     return entries
   }
 }

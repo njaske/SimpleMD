@@ -19,7 +19,9 @@ const IMG_MIME: Record<string, string> = {
 const MAX_FILES = 4000
 const MAX_DEPTH = 12
 const MAX_FILE_BYTES = 5 * 1024 * 1024
-const MAX_IMAGE_BYTES = 16 * 1024 * 1024
+/** Images larger than this aren't shown. Equal to assets.ts MAX_ASSET_BYTES (a
+ *  test keeps them equal), so every pasted image the editor saves is displayed. */
+export const MAX_IMAGE_BYTES = 25 * 1024 * 1024
 /** Parallel file reads during a scan: enough to keep the disk busy without
  *  queueing thousands of pending reads behind libuv's small thread pool. */
 const READ_CONCURRENCY = 32
@@ -246,6 +248,13 @@ export async function saveMdFile(path: string, content: string): Promise<void> {
   }
 }
 
+/** True when `child` is `parent` or lies inside it. A folder named "..notes" is
+ *  inside; only a real ".." step leaves. */
+export function isWithin(parent: string, child: string): boolean {
+  const rel = relative(parent, child)
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
 /** True for UNC / network-share paths (`\\host\share`, `//host/share`, `\\?\UNC\...`). */
 export function isNetworkPath(p: string): boolean {
   return /^[\\/]{2}/.test(p)
@@ -317,10 +326,7 @@ export async function readImageDataUrl(
     const roots = (await Promise.all(allowedRoots.map(realpathOrNull))).filter(
       (r): r is string => r !== null
     )
-    const contained = roots.some((root) => {
-      const rel = relative(root, real)
-      return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
-    })
+    const contained = roots.some((root) => isWithin(root, real))
     if (!contained) return null
 
     const stat = await fs.stat(real)

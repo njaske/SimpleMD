@@ -21,9 +21,9 @@ SimpleMD opens Markdown files that may come from untrusted sources (downloads, A
 - **CSP:** a strict Content-Security-Policy is applied in production (scripts from the app bundle only, no frames, no forms, no `http:` images).
 - **Document styling:** inline styles that could cover the app (`position: fixed/sticky`, `z-index`, `inset`) or load remote resources (`url()`, `@import`) are stripped, as are non-checkbox `<input>`s and media elements. Documents over 1 MB are shown as plain source.
 - **Packaged binary:** Electron fuses disable `RunAsNode`, `NODE_OPTIONS` and `--inspect`, and enforce loading only the integrity-checked app archive.
-- **Local images:** image references are resolved in the main process and only read if they stay inside the document's folder or the opened workspace (symlink and `..` escapes are rejected). UNC / network paths are refused so a document cannot trigger an SMB connection.
+- **Local images:** image references are resolved in the main process and only read if they stay inside the document's folder or the opened workspace (symlink and `..` escapes are rejected), up to 25 MB, the same cap as pasted images. UNC / network paths are refused so a document cannot trigger an SMB connection.
 - **Writes:** saves go through an atomic temp-file-and-rename and refuse file types that run when opened on Windows, macOS or Linux (`.exe`, `.bat`, `.ps1`, `.command`, `.terminal`, `.webloc`, `.sh`, `.desktop`, …).
-- **macOS menu:** the native menu holds only standard roles (About, Hide, Quit, Edit, Window); it adds no reload, developer-tools or file items.
+- **macOS menu:** the native menu holds only standard roles: the app menu (About, Services, Hide, Quit), Edit, View (Toggle Full Screen) and Window; it adds no reload, developer-tools or file items.
 - **Network:** SimpleMD makes no network requests of its own. Remote `https:` images embedded in a document are loaded by the renderer. Spell-checking uses the system dictionaries on Windows and macOS; on Linux it is turned off, because Chromium would download its dictionaries from Google.
 - **Permissions:** all Chromium permission requests (camera, microphone, location, …) are denied.
 

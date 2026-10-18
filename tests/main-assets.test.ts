@@ -10,7 +10,7 @@ import {
   sanitizeStem,
   writeAsset
 } from '../src/main/assets.ts'
-import { readImageDataUrl } from '../src/main/fs-md.ts'
+import { MAX_IMAGE_BYTES, readImageDataUrl } from '../src/main/fs-md.ts'
 
 // 1x1 transparent PNG
 const PNG = new Uint8Array(
@@ -177,6 +177,18 @@ describe('writeAsset', () => {
 
   it('writes images the reader can then display', async () => {
     const rel = await writeAsset(doc, 'shot.png', PNG)
+    const url = await readImageDataUrl(doc, rel, [docDir])
+    assert.ok(url?.startsWith('data:image/png;base64,'))
+  })
+
+  it('uses the same size cap as the image reader', () => {
+    assert.equal(MAX_IMAGE_BYTES, MAX_ASSET_BYTES)
+  })
+
+  it('displays an image just under the cap (a large Retina screenshot)', async () => {
+    const big = new Uint8Array(MAX_ASSET_BYTES - 1)
+    big.set(PNG)
+    const rel = await writeAsset(doc, 'retina.png', big)
     const url = await readImageDataUrl(doc, rel, [docDir])
     assert.ok(url?.startsWith('data:image/png;base64,'))
   })

@@ -1,11 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { promises as fs } from 'fs'
-import { basename, extname, join } from 'path'
-import { isApproved, isLocalAbsolute } from './access'
-import { hasUnsafeExtension, nameProblem, withMarkdownExtension } from './file-ops'
+import { basename, join } from 'path'
+import { isApproved } from './access'
+import { withMarkdownExtension } from './file-ops'
 import { saveMdFile } from './fs-md'
 import { grantFiles, settingsStore } from './grants'
 import { saveRecovery } from './recovery-store'
+import { chosenPath, exportStem, suggestedName } from './save-paths'
 import { loadSettings } from './settings'
 import { watchFolder } from './watcher'
 import {
@@ -22,7 +23,7 @@ import type { FolderScan } from '../shared/types'
 // IPC for creating and changing files: new file / folder, rename, duplicate,
 // Save As, pasted images, HTML/PDF export, crash recovery and recent folders.
 // The access decisions live in workspace-ops (electron-free, unit-tested); this
-// file adds the Save dialogs and the folder watcher.
+// file adds the Save dialogs (names and paths from save-paths) and the folder watcher.
 
 /** A standalone HTML export larger than this is refused (inlined images included). */
 const MAX_EXPORT_CHARS = 64 * 1024 * 1024
@@ -52,28 +53,11 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-/** A bare, valid file name for a Save dialog, from whatever the renderer sent. */
-function suggestedName(defaultName: unknown, fallback: string): string {
-  const raw = typeof defaultName === 'string' ? basename(defaultName.replace(/\\/g, '/')).trim() : ''
-  return raw && !nameProblem(raw, 'file') ? raw : fallback
-}
-
 /** Where Save dialogs start: the open workspace, else the Documents folder. */
 async function dialogFolder(): Promise<string> {
   const settings = await loadSettings()
   const last = settings.lastFolder
   return typeof last === 'string' && (await isDirectory(last)) ? last : app.getPath('documents')
-}
-
-/** The path the user chose, with `ext` added when they typed no extension.
- *  Refuses runnable file types and network locations. */
-function chosenPath(filePath: string, ext: string): string {
-  const target = extname(filePath) === '' ? `${filePath}${ext}` : filePath
-  if (hasUnsafeExtension(target)) throw new Error('SimpleMD can’t save files of that type.')
-  if (!isLocalAbsolute(target)) {
-    throw new Error('SimpleMD can’t save to network locations. Choose a folder on this computer.')
-  }
-  return target
 }
 
 /** When we added the extension ourselves the dialog never asked about replacing
@@ -132,11 +116,6 @@ async function saveAs(event: Electron.IpcMainInvokeEvent, defaultName: unknown, 
   await saveMdFile(target, content)
   await grantFiles([target])
   return target
-}
-
-/** A bare stem for an export's file name ("notes.md" becomes "notes"). */
-function exportStem(defaultName: unknown): string {
-  return suggestedName(defaultName, 'document').replace(/\.[^.]+$/, '') || 'document'
 }
 
 async function exportHtml(event: Electron.IpcMainInvokeEvent, defaultName: unknown, html: unknown): Promise<string | false> {
