@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { medianMs } from './support/logic-timing.ts'
 import {
   addedPaths,
   ensureMdExtension,
@@ -18,18 +19,6 @@ const ZWNJ = String.fromCharCode(0x200c)
 const ZWJ = String.fromCharCode(0x200d)
 const NBSP = String.fromCharCode(0xa0)
 const NNBSP = String.fromCharCode(0x202f)
-
-/** Median wall time of `runs` calls after a warm-up, so one GC pause or a machine busy
- *  with the other test files can't fail a speed check. */
-function medianMs(fn: () => void, runs = 5): number {
-  fn()
-  const times = Array.from({ length: runs }, () => {
-    const started = performance.now()
-    fn()
-    return performance.now() - started
-  })
-  return times.sort((a, b) => a - b)[runs >> 1]
-}
 
 describe('isMarkdownName / ensureMdExtension', () => {
   it('recognizes Markdown extensions case-insensitively', () => {
@@ -191,6 +180,24 @@ describe('titleFromMarkdown', () => {
     assert.equal(titleFromMarkdown('Intro paragraph\n- ```\n  # Secret\n  ```\n'), 'Intro paragraph')
     assert.equal(titleFromMarkdown('1. ```md\n   # Secret\n   ```\n\n# Real'), 'Real')
     assert.equal(titleFromMarkdown('> - ```\n>   # Secret\n>   ```\n\n## Real'), 'Real')
+  })
+
+  it('ends an unclosed list-item fence at the first line left of the item', () => {
+    // Arrange: a streamed answer whose fence never closed; "Para" leaves the list item
+    const md = '- ```\n  code\n\nPara after\n# H\n'
+
+    // Act / Assert: fenced code has no lazy continuation, so the heading is real
+    assert.equal(titleFromMarkdown(md), 'H')
+    assert.equal(suggestFileName(md), 'H.md')
+  })
+
+  it('ends an unclosed quoted fence where the quote ends', () => {
+    assert.equal(titleFromMarkdown('> ```\n> # Secret\n\n# Real'), 'Real')
+    assert.equal(titleFromMarkdown('> ```\n> code\n\nFirst words'), 'First words')
+  })
+
+  it('keeps a quoted fence line inside a top-level block as code', () => {
+    assert.equal(titleFromMarkdown('```md\n> ```\n# Secret\n```\n\n# Real'), 'Real')
   })
 
   it('keeps a fence open past an indented fence line inside it', () => {
@@ -449,6 +456,20 @@ describe('suggestFileName', () => {
     }
   })
 
+  it('keeps room for the device-name suffix in a byte-cut name', () => {
+    // Arrange: "aux." gets " (1)" after the title is cut to the byte limit
+    const md = `# aux.${'👍🏽'.repeat(40)}`
+
+    // Act
+    const name = suggestFileName(md)
+
+    // Assert
+    assert.notEqual(name, 'Untitled.md')
+    assert.ok(name.startsWith('aux (1).👍🏽'), name)
+    assert.ok(new TextEncoder().encode(name).length <= 255, name)
+    assert.equal(validateFileName(name, 'win32'), null, name)
+  })
+
   it('cuts a many-byte title on a word boundary', () => {
     const name = suggestFileName(`# ${'क्षत्रिय '.repeat(12)}`)
     assert.match(name, /^क्षत्रिय( क्षत्रिय)*\.md$/)
@@ -629,6 +650,35 @@ describe('normalizePastedMarkdown', () => {
     for (const md of [`1. \`\`\`bash\n   echo${NBSP}hi\n   \`\`\``, `> - ~~~\n>   a${NBSP}b\n>   ~~~`, `- a\n  - \`\`\`\n    x${NBSP}\n    \`\`\``]) {
       assert.equal(normalizePastedMarkdown(md), `${md}\n`, md)
     }
+  })
+
+  it('cleans prose after an unclosed list-item fence', () => {
+    // Arrange: the fence never closes, but "Para" and "- next" leave its list item
+    const md = `- \`\`\`\n  code${NBSP}\n\nPara${NBSP}after\n- \`\`\`\n  x${NBSP}\n- next${NBSP}item`
+
+    // Act / Assert: code keeps its no-break spaces, the prose loses them
+    assert.equal(normalizePastedMarkdown(md), `- \`\`\`\n  code${NBSP}\n\nPara after\n- \`\`\`\n  x${NBSP}\n- next item\n`)
+  })
+
+  it('cleans prose after an unclosed quoted fence once the quote ends', () => {
+    const md = `> \`\`\`\n> a${NBSP}b\n\nc${NBSP}d`
+    assert.equal(normalizePastedMarkdown(md), `> \`\`\`\n> a${NBSP}b\n\nc d\n`)
+  })
+
+  it('keeps a quoted fence line inside a top-level block as code', () => {
+    // Arrange: the "> ```" shows a quoted fence; it doesn't close the ```md block
+    const md = `\`\`\`md\n> \`\`\`\nstill${NBSP}code\n\`\`\`\nafter${NBSP}`
+
+    // Act / Assert
+    assert.equal(normalizePastedMarkdown(md), `\`\`\`md\n> \`\`\`\nstill${NBSP}code\n\`\`\`\nafter \n`)
+  })
+
+  it('reads indented code after a quoted fence ends', () => {
+    // Arrange: a line indented 4 after the quote is an indented code block
+    const md = `> \`\`\`\n> a\n\n    keep${NBSP}me`
+
+    // Act / Assert
+    assert.equal(normalizePastedMarkdown(md), `${md}\n`)
   })
 
   it('continues the list after a fence on a list item closes', () => {

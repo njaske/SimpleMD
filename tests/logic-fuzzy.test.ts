@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { medianMs } from './support/logic-timing.ts'
 import { fuzzyFilter, fuzzyMatch, scoreAlignment } from '../src/renderer/src/lib/logic/fuzzy.ts'
 
 /** The matched characters, read back through the reported positions. */
@@ -51,18 +52,6 @@ function allAlignments(query: string, text: string): number[][] {
 
 function paths(prefix: string): string[] {
   return Array.from({ length: 5000 }, (_, i) => `${prefix}project-${i % 41}/notes/${i % 13}/Meeting notes ${i}.md`)
-}
-
-/** Median wall time of `runs` calls after a warm-up, so one GC pause or a machine busy
- *  with the other test files can't fail a speed check. */
-function medianMs(fn: () => void, runs = 5): number {
-  fn()
-  const times = Array.from({ length: runs }, () => {
-    const started = performance.now()
-    fn()
-    return performance.now() - started
-  })
-  return times.sort((a, b) => a - b)[runs >> 1]
 }
 
 /** The query with the slowest median time over `items`. */

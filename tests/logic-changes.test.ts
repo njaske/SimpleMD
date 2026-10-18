@@ -1,20 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { medianMs } from './support/logic-timing.ts'
 import { changedLineRanges, countChangedLines, mergeRanges } from '../src/renderer/src/lib/logic/changes.ts'
 
 const lines = (...ls: string[]): string => ls.join('\n')
-
-/** Median wall time of `runs` calls after a warm-up, so one GC pause or a machine busy
- *  with the other test files can't fail a speed check. */
-function medianMs(fn: () => void, runs = 5): number {
-  fn()
-  const times = Array.from({ length: runs }, () => {
-    const started = performance.now()
-    fn()
-    return performance.now() - started
-  })
-  return times.sort((a, b) => a - b)[runs >> 1]
-}
 
 /** `count` distinct, realistic-looking lines, joined. */
 const generated = (count: number, tag: string): string =>
