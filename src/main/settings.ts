@@ -5,10 +5,17 @@ import { join } from 'path'
 import type { Settings } from '../shared/types'
 
 const DEFAULTS: Settings = {
-  theme: 'dark',
+  theme: 'system',
   accent: '#c0392b',
   readingFont: 'Serif',
-  readingWidth: 760,
+  readingWidth: 720,
+  readingSize: 17,
+  lineHeight: 1.7,
+  uiScale: 1,
+  reduceMotion: false,
+  syncScroll: true,
+  blockRemoteImages: false,
+  showStatusBar: true,
   sidebarOpen: true,
   outlineOpen: true,
   activity: 'files',

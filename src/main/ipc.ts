@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { writeFile } from 'fs/promises'
 import { dirname } from 'path'
 import { approveFile, approveRoot, isApproved, isApprovedRoot } from './access'
@@ -77,6 +77,16 @@ export async function restoreAccess(): Promise<void> {
 function denied(): never {
   throw new Error('Access denied: this path was not opened in SimpleMD')
 }
+
+// CONTRACT STUB: replaced by the real implementation (see UPGRADE-SPEC.md, lane M).
+function notImplemented(channel: string): never {
+  throw new Error(`${channel} is not implemented yet`)
+}
+
+const MIN_ZOOM = 0.8
+const MAX_ZOOM = 1.5
+/** Clipboard text larger than this is refused (a pasted document, not a dump). */
+const MAX_CLIPBOARD_CHARS = 5 * 1024 * 1024
 
 function senderWindow(event: Electron.IpcMainInvokeEvent): BrowserWindow | null {
   return BrowserWindow.fromWebContents(event.sender)
@@ -207,6 +217,40 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle('win:isMaximized', (event) => !!senderWindow(event)?.isMaximized())
+
+  ipcMain.handle('win:setZoom', (event, factor: unknown) => {
+    if (typeof factor !== 'number' || !Number.isFinite(factor)) return
+    event.sender.setZoomFactor(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, factor)))
+  })
+
+  ipcMain.handle('win:toggleFullScreen', (event) => {
+    const win = senderWindow(event)
+    if (!win) return false
+    win.setFullScreen(!win.isFullScreen())
+    return win.isFullScreen()
+  })
+
+  ipcMain.handle('clipboard:readText', () => {
+    const text = clipboard.readText()
+    return text.length > MAX_CLIPBOARD_CHARS ? '' : text
+  })
+
+  ipcMain.handle('clipboard:writeRich', (_event, html: unknown, text: unknown) => {
+    if (typeof html !== 'string' || typeof text !== 'string') return
+    clipboard.write({ html, text })
+  })
+
+  // ---- CONTRACT STUBS (lane M implements these; signatures in src/shared/types.ts) ----
+  ipcMain.handle('fs:openRecentFolder', () => notImplemented('fs:openRecentFolder'))
+  ipcMain.handle('fs:createFile', () => notImplemented('fs:createFile'))
+  ipcMain.handle('fs:createFolder', () => notImplemented('fs:createFolder'))
+  ipcMain.handle('fs:renamePath', () => notImplemented('fs:renamePath'))
+  ipcMain.handle('fs:duplicateFile', () => notImplemented('fs:duplicateFile'))
+  ipcMain.handle('dialog:saveAs', () => notImplemented('dialog:saveAs'))
+  ipcMain.handle('fs:writeAsset', () => notImplemented('fs:writeAsset'))
+  ipcMain.handle('export:html', () => notImplemented('export:html'))
+  ipcMain.handle('recovery:save', () => notImplemented('recovery:save'))
+  ipcMain.handle('recovery:load', () => [])
 
   ipcMain.handle('export:pdf', async (event, defaultName: string) => {
     const win = senderWindow(event)

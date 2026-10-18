@@ -1,224 +1,256 @@
 // Dev-only fallback for `window.api`, used when the renderer runs in a plain
 // browser (no Electron preload) — e.g. opening the Vite dev server directly for
 // visual checks. Guarded behind import.meta.env.DEV at the call site, so this
-// module is tree-shaken out of production builds.
-import type { Api, FolderScan, Settings, MdFolderInfo } from '@shared/types'
+// module is tree-shaken out of production builds. Everything lives in memory.
+import type {
+  Api,
+  FolderScan,
+  MdFolderInfo,
+  OpenedFile,
+  Platform,
+  RecoveryEntry,
+  Settings
+} from '@shared/types'
+import { DEV_SAMPLE_FILES } from './devSamples'
 
-const WELCOME = `# Welcome to SimpleMD
+const ROOT = '/sample-notes'
 
-A calm, focused space for reading and writing Markdown. No accounts, no clutter — just your documents.
+const PASTED_ANSWER = `# How to center a div
 
-## Why SimpleMD
+Use **flexbox** on the parent:
 
-- Open an entire **folder** of notes in a single click
-- Read beautifully rendered Markdown, or edit the source side by side
-- Move fast with a live **outline** and full-text **search**
-
-> Good tools disappear. SimpleMD tries to.
-
-This is a browser preview with sample content.`
-
-const GUIDE = `# Markdown Guide
-
-Everything SimpleMD knows how to render.
-
-## Emphasis
-
-You can write *italic*, **bold**, ***both***, and ~~strikethrough~~. Inline \`code\` too.
-
-## Task lists
-
-- [x] Render headings
-- [x] Render tables
-- [ ] Achieve inbox zero
-
-## Code
-
-\`\`\`js
-function debounce(fn, ms = 200) {
-  let t;
-  return (...args) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...args), ms);
-  };
-}
+\`\`\`css
+.parent { display: flex; align-items: center; justify-content: center; }
 \`\`\`
 
-## Tables
-
-| Feature | Status |
-| --- | --- |
-| Tables | Done |
-| Footnotes | Planned |
-
-## Math
-
-Inline math like $E = mc^2$ renders with KaTeX, and display equations too:
-
-$$ \\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx = \\sqrt{\\pi} $$
-
-## Diagrams
-
-\`\`\`mermaid
-flowchart LR
-  A[Open folder] --> B{Has .md files?}
-  B -- Yes --> C[Open all at once]
-  B -- No --> D[Show empty state]
-  C --> E[Read / Split / Edit]
-\`\`\`
-
-> The details are not the details. They make the design.`
-
-const ROADMAP = `# Q3 Roadmap
-
-*Owner: Product*
-
-## Milestones
-
-1. **Reliability** — fewer crashes
-2. **Collaboration** — shared folders
-3. **Polish** — the thousand small things
-
-- [x] Ship folder opener
-- [ ] Comment threads`
-
-const MATH = `# Formulas and Theory
-
-## 1. Definition and Degree of a Polynomial
-
-A polynomial (in one variable $x$) is an expression of the form
-
-$$ P_n(x) = a_n x^n + a_{n-1} x^{n-1} + \\cdots + a_1 x + a_0, $$
-
-where $a_0, a_1, \\dots, a_n$ are the **coefficients**, and the non-negative integer $n$ is the **degree of the polynomial**, denoted $\\deg P$, provided the leading coefficient $a_n \\neq 0$.
-
-## 2. Polynomial Division
-
-For any two polynomials $P(x)$ and $Q(x) \\neq 0$ there exist unique polynomials $S(x)$ and $R(x)$ such that
-
-$$ P(x) = Q(x) \\cdot S(x) + R(x), \\qquad \\deg R < \\deg Q. $$
-
-The quadratic formula gives the roots of a second-degree polynomial:
-
-$$ x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}. $$
-
-Inline example: the solution is $x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$ for $a \\neq 0$.`
-
-const DIAGRAM = `# Flowchart
-
-A mermaid diagram, rendered live by SimpleMD:
-
-\`\`\`mermaid
-flowchart LR
-  A[Open folder] --> B{Has .md files?}
-  B -- Yes --> C[Open all at once]
-  B -- No --> D[Show empty state]
-  C --> E[Read / Split / Edit]
-\`\`\`
-
-Diagrams sit inline with the rest of your document.`
-
-const SHOWCASE = `# Neural Networks — Study Notes
-
-A quick refresher generated from a chat — with the math and the diagram intact.
-
-## Gradient descent
-
-Parameters move along the negative gradient of the loss $L$:
-
-$$ \\theta_{t+1} = \\theta_t - \\eta \\, \\nabla_\\theta L(\\theta_t) $$
-
-where $\\eta$ is the learning rate and $\\nabla_\\theta L$ is the gradient.
-
-## Forward pass
-
-\`\`\`mermaid
-flowchart LR
-  X[Input x] --> H[Hidden layer]
-  H --> Y[Output ŷ]
-  Y --> L[Loss]
-  L -. backprop .-> H
-\`\`\`
+> [!TIP]
+> \`place-items: center\` on a grid parent does the same in one line.
 `
 
-const FILES: Record<string, Array<[string, string]>> = {
-  'Getting Started': [
-    ['Neural Networks.md', SHOWCASE],
-    ['Welcome.md', WELCOME],
-    ['Markdown Guide.md', GUIDE]
-  ],
-  Projects: [['Q3 Roadmap.md', ROADMAP]],
-  Math: [['Polynomials.md', MATH]],
-  Diagrams: [['Flowchart.md', DIAGRAM]]
+function joinPath(dir: string, name: string): string {
+  return `${dir.replace(/\/+$/, '')}/${name}`
+}
+function baseName(p: string): string {
+  return p.split('/').filter(Boolean).pop() ?? p
+}
+function dirName(p: string): string {
+  const i = p.lastIndexOf('/')
+  return i > 0 ? p.slice(0, i) : '/'
+}
+function withMdExt(name: string): string {
+  return /\.(md|markdown|mdown|mkd|mdx|markdn)$/i.test(name) ? name : `${name}.md`
 }
 
-function buildScan(): FolderScan {
-  const root = '/sample-notes'
-  const tree: MdFolderInfo[] = []
-  const contents: Record<string, string> = {}
-  for (const [folder, files] of Object.entries(FILES)) {
-    const dir = `${root}/${folder}`
-    tree.push({
-      id: dir,
-      name: folder,
-      path: dir,
-      files: files.map(([name]) => ({ id: `${dir}/${name}`, name, path: `${dir}/${name}`, dir }))
-    })
-    for (const [name, body] of files) contents[`${dir}/${name}`] = body
-  }
-  return { root, name: 'sample-notes', tree, contents }
+function previewPlatform(): Platform {
+  const forced = new URLSearchParams(location.search).get('platform')
+  if (forced === 'darwin' || forced === 'linux' || forced === 'win32') return forced
+  return /Mac/i.test(navigator.platform) ? 'darwin' : 'win32'
 }
 
 export function installDevApi(): void {
-  const scan = buildScan()
-  const contents = { ...scan.contents }
-  const welcome = `${scan.root}/Getting Started/Welcome.md`
-  const showcase = `${scan.root}/Getting Started/Neural Networks.md`
+  const contents: Record<string, string> = {}
+  // folder path -> file names
+  const folders = new Map<string, string[]>()
+  for (const [folder, files] of Object.entries(DEV_SAMPLE_FILES)) {
+    const dir = joinPath(ROOT, folder)
+    folders.set(
+      dir,
+      files.map(([name]) => name)
+    )
+    for (const [name, body] of files) contents[joinPath(dir, name)] = body
+  }
+
+  const scan = (): FolderScan => {
+    const tree: MdFolderInfo[] = []
+    for (const [dir, names] of folders) {
+      if (!names.length) continue
+      const sorted = [...names].sort((a, b) => a.localeCompare(b))
+      tree.push({
+        id: dir,
+        name: dir.slice(ROOT.length + 1) || 'sample-notes',
+        path: dir,
+        files: sorted.map((name) => ({
+          id: joinPath(dir, name),
+          name,
+          path: joinPath(dir, name),
+          dir
+        }))
+      })
+    }
+    const snapshot: Record<string, string> = {}
+    for (const f of tree.flatMap((t) => t.files)) snapshot[f.path] = contents[f.path] ?? ''
+    return { root: ROOT, name: 'sample-notes', tree, contents: snapshot }
+  }
+
+  const folderListeners = new Set<() => void>()
+  const changed = (): void => folderListeners.forEach((cb) => setTimeout(cb, 50))
+
+  const first = scan().tree[0]?.files[0]?.path ?? null
+  const welcome = joinPath(ROOT, 'Getting Started/Welcome.md')
   const settings: Settings = {
-    theme: 'dark',
+    theme: 'system',
     accent: '#c0392b',
     readingFont: 'Serif',
-    readingWidth: 760,
+    readingWidth: 720,
+    readingSize: 17,
+    lineHeight: 1.7,
+    uiScale: 1,
+    reduceMotion: false,
+    syncScroll: true,
+    blockRemoteImages: false,
+    showStatusBar: true,
     sidebarOpen: true,
     outlineOpen: true,
     activity: 'files',
     viewMode: 'read',
-    lastFolder: scan.root,
+    lastFolder: ROOT,
     pinned: [welcome],
     recents: [],
-    openTabs: [showcase, welcome],
-    activeId: showcase,
-    looseFiles: []
+    openTabs: first ? [first, welcome] : [],
+    activeId: first,
+    looseFiles: [],
+    recentFolders: [ROOT, '/Users/demo/Projects/agent-notes']
+  }
+  if (new URLSearchParams(location.search).has('empty')) {
+    settings.lastFolder = null
+    settings.openTabs = []
+    settings.activeId = null
+  }
+
+  let recovery: RecoveryEntry[] = []
+  let zoom = 1
+
+  const addFile = (dir: string, name: string, content: string): OpenedFile => {
+    const path = joinPath(dir, name)
+    if (contents[path] !== undefined) throw new Error(`${name} already exists`)
+    contents[path] = content
+    folders.set(dir, [...(folders.get(dir) ?? []), name])
+    changed()
+    return { path, content }
   }
 
   const api: Api = {
-    openFolder: async () => scan,
+    platform: previewPlatform(),
+    openFolder: async () => scan(),
     openFiles: async () => [
-      { path: '/Sample Folder/Loose Note.md', content: '# Loose Note\n\nOpened as an individual file, grouped by its folder.' }
+      {
+        path: '/Sample Folder/Loose Note.md',
+        content: '# Loose Note\n\nOpened as an individual file, grouped by its folder.'
+      }
     ],
+    openRecentFolder: async (path) => (path === ROOT ? scan() : null),
     resolveDrop: async () => ({ folder: null, files: [] }),
     takeLaunchFiles: async () => null,
     onOpenPaths: () => () => {},
-    scanFolder: async () => scan,
-    readFile: async (path) => contents[path] ?? '',
+    scanFolder: async () => scan(),
+    readFile: async (path) => {
+      if (contents[path] === undefined) throw new Error('missing')
+      return contents[path]
+    },
     saveFile: async (path, content) => {
       contents[path] = content
       return true
     },
     readImage: async () => null,
-    getSettings: async () => settings,
-    setSettings: async (partial) => Object.assign(settings, partial),
-    openExternal: async (url) => {
-      window.open(url, '_blank', 'noopener')
+    createFile: async (dir, name, content = '') => addFile(dir, withMdExt(name), content),
+    createFolder: async (parent, name) => {
+      const dir = joinPath(parent, name)
+      folders.set(dir, folders.get(dir) ?? [])
+      return dir
     },
-    trashItem: async () => true,
-    revealItem: async () => {},
+    renamePath: async (path, newName) => {
+      const dir = dirName(path)
+      const next = joinPath(dir, newName)
+      if (contents[path] !== undefined) {
+        if (contents[next] !== undefined) throw new Error(`${newName} already exists`)
+        contents[next] = contents[path]
+        delete contents[path]
+        folders.set(
+          dir,
+          (folders.get(dir) ?? []).map((n) => (n === baseName(path) ? newName : n))
+        )
+      }
+      changed()
+      return next
+    },
+    duplicateFile: async (path) => {
+      const dir = dirName(path)
+      const stem = baseName(path).replace(/\.[^.]+$/, '')
+      let n = 1
+      let name = `${stem} copy.md`
+      while (contents[joinPath(dir, name)] !== undefined) name = `${stem} copy ${++n}.md`
+      return addFile(dir, name, contents[path] ?? '')
+    },
+    saveAs: async (defaultName, content) => {
+      const name = window.prompt('Save as (preview)', withMdExt(defaultName))
+      if (!name) return null
+      const dir = joinPath(ROOT, 'Getting Started')
+      const path = joinPath(dir, withMdExt(name))
+      if (contents[path] === undefined) folders.set(dir, [...(folders.get(dir) ?? []), withMdExt(name)])
+      contents[path] = content
+      changed()
+      return path
+    },
+    writeAsset: async (_docPath, fileName) => `assets/${fileName}`,
+    exportHtml: async (defaultName, html) => {
+      const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${defaultName.replace(/\.[^.]+$/, '')}.html`
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      return a.download
+    },
     exportPdf: async () => {
       window.print()
       return false
     },
+    readClipboardText: async () => {
+      try {
+        return (await navigator.clipboard.readText()) || PASTED_ANSWER
+      } catch {
+        return PASTED_ANSWER
+      }
+    },
+    writeClipboardRich: async (html, text) => {
+      try {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            'text/html': new Blob([html], { type: 'text/html' }),
+            'text/plain': new Blob([text], { type: 'text/plain' })
+          })
+        ])
+      } catch {
+        // clipboard permission denied in the preview
+      }
+    },
+    saveRecovery: async (entries) => {
+      recovery = entries
+    },
+    loadRecovery: async () => recovery,
+    getSettings: async () => ({ ...settings }),
+    setSettings: async (partial) => Object.assign(settings, partial),
+    openExternal: async (url) => {
+      window.open(url, '_blank', 'noopener')
+    },
+    trashItem: async (path) => {
+      if (contents[path] !== undefined) {
+        delete contents[path]
+        const dir = dirName(path)
+        folders.set(
+          dir,
+          (folders.get(dir) ?? []).filter((n) => n !== baseName(path))
+        )
+        changed()
+      }
+      return true
+    },
+    revealItem: async () => {},
     setUnsaved: async () => {},
-    onFolderChanged: () => () => {},
+    onFolderChanged: (cb) => {
+      folderListeners.add(cb)
+      return () => folderListeners.delete(cb)
+    },
     onRequestClose: () => () => {},
     win: {
       minimize: async () => {},
@@ -226,7 +258,16 @@ export function installDevApi(): void {
       close: async () => {},
       forceClose: async () => {},
       isMaximized: async () => false,
-      onMaximizeChange: () => () => {}
+      onMaximizeChange: () => () => {},
+      setZoom: async (factor) => {
+        zoom = factor
+        document.documentElement.style.zoom = String(zoom)
+      },
+      toggleFullScreen: async () => {
+        if (document.fullscreenElement) await document.exitFullscreen()
+        else await document.documentElement.requestFullscreen()
+        return !!document.fullscreenElement
+      }
     }
   }
   ;(window as unknown as { api: Api }).api = api

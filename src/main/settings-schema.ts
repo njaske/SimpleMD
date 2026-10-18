@@ -1,19 +1,21 @@
 import type { Settings } from '../shared/types'
 
 // Validation for settings sent by the renderer. Only display state may be set
-// from the page; `lastFolder` and `approvedFiles` grant file access and are
-// written by the main process alone. Values of the wrong type are dropped so a
-// bad write can never break the next launch.
+// from the page; `lastFolder`, `approvedFiles` and `recentFolders` grant file
+// access and are written by the main process alone. Values of the wrong type
+// are dropped so a bad write can never break the next launch.
 
 const MAX_LIST = 500
-const THEMES = ['light', 'dark']
-const FONTS = ['Sans', 'Serif', 'Mono']
+const THEMES = ['light', 'dark', 'sepia', 'system']
+const FONTS = ['Serif', 'Sans', 'Mono', 'Hyperlegible']
 const ACTIVITIES = ['files', 'search', 'pinned']
 const VIEW_MODES = ['read', 'split', 'edit']
 
 type Check = (value: unknown) => boolean
 
 const isBool: Check = (v) => typeof v === 'boolean'
+const inRange = (min: number, max: number): Check => (v) =>
+  typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max
 const oneOf = (allowed: string[]): Check => (v) => typeof v === 'string' && allowed.includes(v)
 const isPathList: Check = (v) =>
   Array.isArray(v) && v.length <= MAX_LIST && v.every((x) => typeof x === 'string' && x.length < 4096)
@@ -22,7 +24,14 @@ const RENDERER_SETTABLE: Partial<Record<keyof Settings, Check>> = {
   theme: oneOf(THEMES),
   accent: (v) => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v),
   readingFont: oneOf(FONTS),
-  readingWidth: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 400 && v <= 1600,
+  readingWidth: inRange(400, 1600),
+  readingSize: inRange(12, 28),
+  lineHeight: inRange(1.2, 2.4),
+  uiScale: inRange(0.8, 1.5),
+  reduceMotion: isBool,
+  syncScroll: isBool,
+  blockRemoteImages: isBool,
+  showStatusBar: isBool,
   sidebarOpen: isBool,
   outlineOpen: isBool,
   activity: oneOf(ACTIVITIES),

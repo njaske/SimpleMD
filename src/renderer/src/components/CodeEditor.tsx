@@ -7,6 +7,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags as t } from '@lezer/highlight'
+import type { EditorHandle } from '@/lib/editor/types'
 
 export interface EditorJump {
   fileId: string
@@ -21,6 +22,13 @@ interface Props {
   onChange: (value: string) => void
   isDark: boolean
   jump: EditorJump | null
+  /** Editor text size in px (CONTRACT: lane E applies it). */
+  fontSize?: number
+  /** Receives the imperative handle once mounted, and null on unmount (CONTRACT: lane E). */
+  onReady?: (handle: EditorHandle | null) => void
+  /** Save a pasted/dropped image next to the document; resolves to the relative link
+   *  path ("assets/x.png"), or null when the document has no folder yet (untitled). */
+  onSaveImage?: (file: File) => Promise<string | null>
 }
 
 // Colors come from the app's CSS custom properties, so a single theme tracks

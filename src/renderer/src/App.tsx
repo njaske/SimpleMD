@@ -8,13 +8,13 @@ import type {
   MdFolderInfo,
   OpenedFile,
   ReadingFont,
+  ResolvedTheme,
   Settings,
   ThemeName,
   ViewMode
 } from '@shared/types'
-import { parseMarkdown, prepareMarkdown } from '@/lib/markdown'
-import { highlightCode } from '@/lib/highlight'
 import { computeOutline, computeStats, searchAll } from '@/lib/document'
+import { ReaderController } from '@/lib/reader/ReaderController'
 import type { SearchableFile, SearchResult } from '@/lib/document'
 import type { FolderItem, NamedFileRef, OutlineItem, TabItem } from '@/state/viewmodel'
 import TitleBar from '@/components/TitleBar'
@@ -44,27 +44,22 @@ const MAX_AUTO_OPEN = 40
 const MAX_RECENTS = 8
 /** Settings writes are coalesced for this long after the last change. */
 const PERSIST_DELAY_MS = 400
-/** In split view the preview trails typing by this long (longer for huge docs). */
-const LIVE_PREVIEW_DELAY_MS = 150
-const LIVE_PREVIEW_DELAY_LARGE_MS = 400
-const LARGE_DOC_CHARS = 200_000
 /** Warm the lazy editor chunk this long after startup, off the critical path. */
 const EDITOR_PREFETCH_DELAY_MS = 2000
 const NO_SEARCH: SearchResult = { groups: [], total: 0, fileCount: 0 }
 const READING_FONTS: Record<ReadingFont, string> = {
   Sans: "'Helvetica Neue',Helvetica,Arial,sans-serif",
   Serif: "'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif",
-  Mono: 'var(--mono)'
+  Mono: 'var(--mono)',
+  Hyperlegible: "'Helvetica Neue',Helvetica,Arial,sans-serif"
 }
 
-let mermaidSeq = 0
+const darkQuery = typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)') : null
 
-/** Identity of what the reader last painted; a render is skipped while it matches. */
-interface RenderKey {
-  id: string | null
-  mode: ViewMode
-  theme: ThemeName
-  md: string
+/** The theme to paint: 'system' follows the OS. */
+function resolveTheme(theme: ThemeName): ResolvedTheme {
+  if (theme === 'system') return darkQuery?.matches ? 'dark' : 'light'
+  return theme
 }
 
 /** Last path segment of a file/dir path (handles both / and \\). */
@@ -86,9 +81,18 @@ interface FileMeta {
 
 interface AppState {
   theme: ThemeName
+  /** Bumped when the OS light/dark preference changes, so 'system' re-resolves. */
+  systemThemeTick: number
   accent: string
   readingFont: ReadingFont
   readingWidth: number
+  readingSize: number
+  lineHeight: number
+  uiScale: number
+  reduceMotion: boolean
+  syncScroll: boolean
+  blockRemoteImages: boolean
+  showStatusBar: boolean
   activity: Activity
   sidebarOpen: boolean
   outlineOpen: boolean
@@ -119,17 +123,15 @@ interface AppState {
 
 export default class App extends Component<Record<string, never>, AppState> {
   private rootRef = createRef<HTMLDivElement>()
-  private readerRef = createRef<HTMLDivElement>()
   private index = new Map<string, FileMeta>()
-  private renderKey: RenderKey | null = null
-  // Bumped on every real repaint so async work (images, mermaid) can tell its DOM is stale.
-  private renderGen = 0
-  private preparing = false
-  private renderTimer: ReturnType<typeof setTimeout> | null = null
+  private reader = new ReaderController({
+    readImage: (docPath, src) => window.api.readImage(docPath, src),
+    onLink: (href) => this.openLink(href),
+    onToggleTask: () => {}
+  })
   private memos = new Map<string, { deps: readonly unknown[]; value: unknown }>()
   private scanning = false
   private rescanQueued = false
-  private lastFile: string | null = null
   private unsubMax: (() => void) | null = null
   private unsubFolderChanged: (() => void) | null = null
   private unsubRequestClose: (() => void) | null = null
@@ -143,10 +145,18 @@ export default class App extends Component<Record<string, never>, AppState> {
   constructor(props: Record<string, never>) {
     super(props)
     this.state = {
-      theme: 'dark',
+      theme: 'system',
+      systemThemeTick: 0,
       accent: '#c0392b',
       readingFont: 'Serif',
-      readingWidth: 760,
+      readingWidth: 720,
+      readingSize: 17,
+      lineHeight: 1.7,
+      uiScale: 1,
+      reduceMotion: false,
+      syncScroll: true,
+      blockRemoteImages: false,
+      showStatusBar: true,
       activity: 'files',
       sidebarOpen: true,
       outlineOpen: true,
@@ -189,7 +199,23 @@ export default class App extends Component<Record<string, never>, AppState> {
     window.addEventListener('drop', this.resetDrag)
     // React never unmounts when the window closes, so flush on pagehide too.
     window.addEventListener('pagehide', this.flushPersist)
+    darkQuery?.addEventListener('change', this.onSystemTheme)
     this.bootstrap()
+  }
+
+  private onSystemTheme = (): void => this.setState((s) => ({ systemThemeTick: s.systemThemeTick + 1 }))
+
+  private setReaderEl = (el: HTMLDivElement | null): void => this.reader.attach(el)
+
+  /** Repaint the reader from current state (cheap when nothing changed). */
+  private renderDoc(force: boolean): void {
+    const s = this.state
+    const id = s.activeId
+    this.reader.update(
+      { id, path: id && !id.startsWith('untitled:') ? id : null, md: this.contentOf(id) },
+      { mode: s.viewMode, theme: resolveTheme(s.theme), blockRemoteImages: s.blockRemoteImages },
+      force
+    )
   }
 
   private flushPersist = (): void => {
@@ -204,25 +230,34 @@ export default class App extends Component<Record<string, never>, AppState> {
     window.removeEventListener('dragend', this.resetDrag)
     window.removeEventListener('drop', this.resetDrag)
     window.removeEventListener('pagehide', this.flushPersist)
+    darkQuery?.removeEventListener('change', this.onSystemTheme)
     this.unsubMax?.()
     this.unsubFolderChanged?.()
     this.unsubRequestClose?.()
     this.unsubOpenPaths?.()
     if (this.noteTimer) clearTimeout(this.noteTimer)
-    if (this.renderTimer) clearTimeout(this.renderTimer)
+    this.reader.dispose()
     // Flush any pending settings write so nothing is lost on close.
     this.flushPersist()
   }
 
   componentDidUpdate(_props: unknown, prev: AppState): void {
     const s = this.state
-    if (s.accent !== prev.accent || s.readingWidth !== prev.readingWidth || s.readingFont !== prev.readingFont) {
+    if (
+      s.accent !== prev.accent || s.readingWidth !== prev.readingWidth || s.readingFont !== prev.readingFont ||
+      s.readingSize !== prev.readingSize || s.lineHeight !== prev.lineHeight
+    ) {
       this.applyProps()
     }
+    if (s.uiScale !== prev.uiScale) void window.api.win.setZoom(s.uiScale)
     this.renderDoc(false)
     if (
       s.theme !== prev.theme || s.accent !== prev.accent || s.readingFont !== prev.readingFont ||
-      s.readingWidth !== prev.readingWidth || s.activity !== prev.activity ||
+      s.readingWidth !== prev.readingWidth || s.readingSize !== prev.readingSize ||
+      s.lineHeight !== prev.lineHeight || s.uiScale !== prev.uiScale ||
+      s.reduceMotion !== prev.reduceMotion || s.syncScroll !== prev.syncScroll ||
+      s.blockRemoteImages !== prev.blockRemoteImages || s.showStatusBar !== prev.showStatusBar ||
+      s.activity !== prev.activity ||
       s.sidebarOpen !== prev.sidebarOpen || s.outlineOpen !== prev.outlineOpen ||
       s.viewMode !== prev.viewMode || s.pinned !== prev.pinned || s.recents !== prev.recents ||
       s.openTabs !== prev.openTabs || s.activeId !== prev.activeId ||
@@ -253,6 +288,13 @@ export default class App extends Component<Record<string, never>, AppState> {
         accent: s.accent,
         readingFont: s.readingFont,
         readingWidth: s.readingWidth,
+        readingSize: s.readingSize,
+        lineHeight: s.lineHeight,
+        uiScale: s.uiScale,
+        reduceMotion: s.reduceMotion,
+        syncScroll: s.syncScroll,
+        blockRemoteImages: s.blockRemoteImages,
+        showStatusBar: s.showStatusBar,
         activity: s.activity,
         sidebarOpen: s.sidebarOpen,
         outlineOpen: s.outlineOpen,
@@ -263,6 +305,7 @@ export default class App extends Component<Record<string, never>, AppState> {
       },
       () => {
         this.applyProps()
+        if (s.uiScale !== 1) void window.api.win.setZoom(s.uiScale)
         this.renderDoc(true)
       }
     )
@@ -332,6 +375,8 @@ export default class App extends Component<Record<string, never>, AppState> {
     r.style.setProperty('--accent', this.state.accent)
     r.style.setProperty('--read-width', this.state.readingWidth + 'px')
     r.style.setProperty('--read-font', READING_FONTS[this.state.readingFont])
+    r.style.setProperty('--read-size', this.state.readingSize + 'px')
+    r.style.setProperty('--read-leading', String(this.state.lineHeight))
   }
 
   private persist(): void {
@@ -342,6 +387,13 @@ export default class App extends Component<Record<string, never>, AppState> {
       accent: s.accent,
       readingFont: s.readingFont,
       readingWidth: s.readingWidth,
+      readingSize: s.readingSize,
+      lineHeight: s.lineHeight,
+      uiScale: s.uiScale,
+      reduceMotion: s.reduceMotion,
+      syncScroll: s.syncScroll,
+      blockRemoteImages: s.blockRemoteImages,
+      showStatusBar: s.showStatusBar,
       activity: s.activity,
       sidebarOpen: s.sidebarOpen,
       outlineOpen: s.outlineOpen,
@@ -773,7 +825,8 @@ export default class App extends Component<Record<string, never>, AppState> {
       pinned: s.pinned.includes(id) ? s.pinned.filter((p) => p !== id) : [...s.pinned, id]
     }))
 
-  private toggleTheme = (): void => this.setState((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' }))
+  private toggleTheme = (): void =>
+    this.setState((s) => ({ theme: resolveTheme(s.theme) === 'dark' ? 'light' : 'dark' }))
   private toggleSidebar = (): void => this.setState((s) => ({ sidebarOpen: !s.sidebarOpen }))
   private toggleOutline = (): void => this.setState((s) => ({ outlineOpen: !s.outlineOpen }))
   private togglePrefs = (): void => this.setState((s) => ({ prefsOpen: !s.prefsOpen }))
@@ -961,16 +1014,7 @@ export default class App extends Component<Record<string, never>, AppState> {
     })
   }
 
-  private scrollToHeading = (slug: string): void => {
-    const el = this.readerRef.current
-    if (!el) return
-    try {
-      const target = el.querySelector<HTMLElement>('#' + CSS.escape(slug))
-      if (target) el.scrollTo({ top: Math.max(0, target.offsetTop - 16), behavior: 'smooth' })
-    } catch {
-      // invalid selector — ignore
-    }
-  }
+  private scrollToHeading = (slug: string): void => this.reader.scrollToId(slug)
 
   private gotoMatch = (id: string, line: number, col: number, len: number): void => {
     this.openFile(id)
@@ -980,22 +1024,12 @@ export default class App extends Component<Record<string, never>, AppState> {
     }))
   }
 
-  private onReaderClick = (e: ReactMouseEvent<HTMLDivElement>): void => {
-    const anchor = (e.target as HTMLElement).closest('a')
-    if (!anchor) return
-    const href = anchor.getAttribute('href') || ''
-    if (!href) return
-    if (href.startsWith('#')) {
-      e.preventDefault()
-      this.scrollToHeading(href.slice(1))
-      return
-    }
+  /** A link clicked in the reader: web links go to the browser, relative ones open files. */
+  private openLink(href: string): void {
     if (/^https?:\/\//i.test(href)) {
-      e.preventDefault()
       window.api.openExternal(href)
       return
     }
-    e.preventDefault()
     this.tryOpenRelative(href)
   }
 
@@ -1064,207 +1098,12 @@ export default class App extends Component<Record<string, never>, AppState> {
     }
   }
 
-  // ---- imperative reader rendering -----------------------------------------
-
-  private renderDoc(force: boolean): void {
-    const el = this.readerRef.current
-    if (!el) return
-    const id = this.state.activeId
-    const md = this.contentOf(id)
-    const mode = this.state.viewMode
-    const theme = this.state.theme
-    const last = this.renderKey
-    const sameView = !!last && last.id === id && last.mode === mode && last.theme === theme
-    const needsFill = el.childElementCount === 0
-    if (!force && !needsFill && sameView && last.md === md) return
-
-    // While typing in split view, let the preview trail the keystrokes instead
-    // of re-parsing the whole document on each one.
-    if (!force && !needsFill && sameView && mode === 'split') {
-      if (this.renderTimer) clearTimeout(this.renderTimer)
-      const delay = md.length > LARGE_DOC_CHARS ? LIVE_PREVIEW_DELAY_LARGE_MS : LIVE_PREVIEW_DELAY_MS
-      this.renderTimer = setTimeout(() => {
-        this.renderTimer = null
-        this.renderDoc(true)
-      }, delay)
-      return
-    }
-
-    // KaTeX / highlight.js load on demand; wait for them so the first paint of
-    // a document that needs them is already correct.
-    const pending = id ? prepareMarkdown(md) : null
-    if (pending) {
-      // One re-render once the chunks arrive, however many updates came meanwhile.
-      if (!this.preparing) {
-        this.preparing = true
-        void pending.then(() => {
-          this.preparing = false
-          this.renderDoc(true)
-        })
-      }
-      return
-    }
-
-    if (this.renderTimer) {
-      clearTimeout(this.renderTimer)
-      this.renderTimer = null
-    }
-    this.renderKey = { id, mode, theme, md }
-    const myGen = ++this.renderGen
-    if (!id) {
-      el.innerHTML = ''
-      this.lastFile = null
-      return
-    }
-    const changedFile = this.lastFile !== id
-    const html = parseMarkdown(md)
-    const outline = computeOutline(md)
-    // Build the article inside an inert <template> so <img> tags in the document
-    // are never fetched (enhanceImages swaps them out); it's attached once ready.
-    const tpl = document.createElement('template')
-    tpl.innerHTML = '<div class="smd-article' + (changedFile ? ' smd-fade' : '') + '">' + html + '</div>'
-    const article = tpl.content.firstElementChild as HTMLElement | null
-    if (!article) return
-
-    article.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach((h, i) => {
-      if (outline[i]) (h as HTMLElement).id = outline[i].slug
-    })
-    this.enhanceImages(article, id, myGen)
-
-    // Pull mermaid blocks out before highlighting so hljs/copy buttons skip them.
-    const mermaidJobs: { container: HTMLElement; source: string }[] = []
-    article.querySelectorAll<HTMLElement>('pre > code.language-mermaid').forEach((code) => {
-      const pre = code.parentElement
-      if (!pre) return
-      const container = document.createElement('div')
-      container.className = 'smd-mermaid'
-      pre.replaceWith(container)
-      mermaidJobs.push({ container, source: code.textContent || '' })
-    })
-
-    article.querySelectorAll<HTMLElement>('pre code[class*="language-"]').forEach((code) => {
-      try {
-        highlightCode(code)
-      } catch {
-        // unknown language — leave as plain text
-      }
-    })
-    article.querySelectorAll<HTMLElement>('pre').forEach((pre) => this.addCopyButton(pre))
-
-    el.replaceChildren(article)
-    if (mermaidJobs.length) this.renderMermaid(mermaidJobs, myGen)
-
-    if (changedFile) {
-      el.scrollTop = 0
-      this.lastFile = id
-    }
-  }
-
-  private enhanceImages(article: HTMLElement, docPath: string, myGen: number): void {
-    article.querySelectorAll('img').forEach((img) => {
-      const src = img.getAttribute('src') || ''
-      const alt = img.getAttribute('alt') || ''
-      const remote = /^(https?:|data:)/i.test(src)
-      const figure = document.createElement('figure')
-      figure.className = 'smd-img'
-
-      if (remote) {
-        const real = document.createElement('img')
-        real.src = src
-        real.alt = alt
-        figure.appendChild(real)
-      } else {
-        const placeholder = document.createElement('div')
-        placeholder.className = 'smd-imgph'
-        const span = document.createElement('span')
-        span.textContent = alt || src || 'image'
-        placeholder.appendChild(span)
-        figure.appendChild(placeholder)
-      }
-      if (alt) {
-        const caption = document.createElement('figcaption')
-        caption.textContent = alt
-        figure.appendChild(caption)
-      }
-      img.replaceWith(figure)
-
-      if (!remote) {
-        window.api
-          .readImage(docPath, src)
-          .then((dataUrl) => {
-            if (this.renderGen !== myGen || !figure.isConnected || !dataUrl) return
-            const real = document.createElement('img')
-            real.src = dataUrl
-            real.alt = alt
-            const placeholder = figure.querySelector('.smd-imgph')
-            if (placeholder) placeholder.replaceWith(real)
-          })
-          .catch(() => {})
-      }
-    })
-  }
-
-  private addCopyButton(pre: HTMLElement): void {
-    const button = document.createElement('button')
-    button.className = 'smd-copy'
-    button.type = 'button'
-    button.textContent = 'Copy'
-    button.addEventListener('click', () => {
-      const code = pre.querySelector('code')
-      const text = code ? code.innerText : ''
-      navigator.clipboard?.writeText(text).catch(() => {})
-      button.textContent = 'Copied'
-      setTimeout(() => {
-        button.textContent = 'Copy'
-      }, 1200)
-    })
-    pre.appendChild(button)
-  }
-
-  private async renderMermaid(
-    jobs: { container: HTMLElement; source: string }[],
-    myGen: number
-  ): Promise<void> {
-    let mermaid
-    try {
-      mermaid = (await import('mermaid')).default
-    } catch {
-      return // mermaid chunk failed to load; leave placeholders empty
-    }
-    if (this.renderGen !== myGen) return
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: 'strict',
-      theme: this.state.theme === 'dark' ? 'dark' : 'default',
-      fontFamily: "'Helvetica Neue',Helvetica,Arial,sans-serif"
-    })
-    for (const job of jobs) {
-      if (this.renderGen !== myGen) return
-      if (!job.container.isConnected) continue
-      try {
-        const { svg } = await mermaid.render('smd-mmd-' + ++mermaidSeq, job.source)
-        if (this.renderGen !== myGen || !job.container.isConnected) return
-        job.container.innerHTML = svg
-      } catch {
-        // Invalid diagram — fall back to showing the source with a small note.
-        job.container.className = 'smd-mermaid smd-mermaid-error'
-        const note = document.createElement('div')
-        note.className = 'smd-mermaid-note'
-        note.textContent = 'Could not render this diagram'
-        const pre = document.createElement('pre')
-        const code = document.createElement('code')
-        code.textContent = job.source
-        pre.appendChild(code)
-        job.container.replaceChildren(note, pre)
-      }
-    }
-  }
-
   // ---- render --------------------------------------------------------------
 
   render() {
     const s = this.state
-    const isDark = s.theme === 'dark'
+    const resolved = resolveTheme(s.theme)
+    const isDark = resolved === 'dark'
     const activeId = s.activeId
     const af = activeId ? this.fileMeta(activeId) : null
     const hasTabs = s.openTabs.length > 0
@@ -1368,7 +1207,7 @@ export default class App extends Component<Record<string, never>, AppState> {
     return (
       <div
         ref={this.rootRef}
-        className={'smd-root ' + (isDark ? 'smd-dark' : 'smd-light')}
+        className={'smd-root smd-' + resolved}
         onDragEnter={this.onDragEnter}
         onDragOver={this.onDragOver}
         onDragLeave={this.onDragLeave}
@@ -1507,12 +1346,11 @@ export default class App extends Component<Record<string, never>, AppState> {
                   )}
                   {showReader && (
                     <div
-                      ref={this.readerRef}
+                      ref={this.setReaderEl}
                       className="smd-reader"
                       role="article"
                       tabIndex={0}
                       aria-label={af ? `${af.name} — rendered document` : 'Rendered document'}
-                      onClick={this.onReaderClick}
                       style={{ flex: 1, minWidth: 0, overflowY: 'auto', position: 'relative', background: 'var(--bg)' }}
                     />
                   )}
