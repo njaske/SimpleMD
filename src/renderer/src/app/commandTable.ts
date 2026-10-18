@@ -7,15 +7,27 @@ import type { DocumentActions } from './documents'
 import type { ExportActions } from './exporting'
 import type { FileActions } from './files'
 import type { ViewActions } from './viewActions'
-import { dirOf, isUntitled, isWithin } from './model'
+import { dirOf, isUntitled, isWithin, unsavedIds } from './model'
 
 export interface CommandBinding {
   run: () => void
   /** Hidden from the palette and inert when false. */
   enabled?: () => boolean
+  /** A palette label that follows state (a toggle says what it will do). */
+  label?: () => string
 }
 
 export type CommandTable = Partial<Record<CommandId, CommandBinding>>
+
+/** Reader features the App wires up (find bar, change marks, follow the end). */
+export interface ReadingCommands {
+  find: () => void
+  nextChange: () => void
+  dismissChanges: () => void
+  followEnd: () => void
+  /** The active document has "what changed" marks. */
+  hasChanges: () => boolean
+}
 
 export interface CommandDeps {
   host: AppHost
@@ -25,15 +37,18 @@ export interface CommandDeps {
   exports: ExportActions
   /** F2: the focused tree row, else the active document. */
   renameTarget: () => { path: string; isFolder: boolean } | null
+  reading: ReadingCommands
 }
 
-export function buildCommandTable({ host, docs, files, view, exports, renameTarget }: CommandDeps): CommandTable {
+export function buildCommandTable(deps: CommandDeps): CommandTable {
+  const { host, docs, files, view, exports, renameTarget, reading } = deps
   const s = (): ReturnType<AppHost['state']> => host.state()
   const hasDoc = (): boolean => !!s().activeId
   const hasFile = (): boolean => !!s().activeId && !isUntitled(s().activeId)
   const inWorkspace = (): boolean => hasFile() && !!s().root && isWithin(s().activeId ?? '', s().root ?? '')
   const active = (): string => s().activeId ?? ''
   const manyTabs = (): boolean => s().openTabs.length > 1
+  const changesShown = (): boolean => hasDoc() && s().viewMode !== 'edit' && reading.hasChanges()
 
   return {
     newDocument: { run: () => void docs.newDocument() },
@@ -43,7 +58,12 @@ export function buildCommandTable({ host, docs, files, view, exports, renameTarg
     pasteFromAi: { run: () => void docs.pasteFromAi() },
     save: { run: () => void docs.save(), enabled: hasDoc },
     saveAs: { run: () => void docs.saveAs(active()), enabled: hasDoc },
-    saveAll: { run: () => void docs.saveAll() },
+    saveAll: {
+      run: () => {
+        if (unsavedIds(s().contents, s().saved).length) void docs.saveAll()
+        else host.toast('Everything is already saved')
+      }
+    },
     reloadFromDisk: { run: () => void docs.reloadFromDisk(), enabled: hasFile },
     closeTab: { run: docs.closeActive, enabled: hasDoc },
     closeOtherTabs: { run: () => docs.closeOthers(), enabled: manyTabs },
@@ -53,18 +73,23 @@ export function buildCommandTable({ host, docs, files, view, exports, renameTarg
     previousTab: { run: () => docs.cycle(-1), enabled: manyTabs },
     quickOpen: { run: () => view.openPalette('') },
     commandPalette: { run: () => view.openPalette('>') },
-    // Until the FindBar is wired (integration replaces this line), Mod+F keeps its
-    // 1.1 behaviour of opening the Search panel rather than going dead.
-    findInDocument: { run: view.searchAll },
+    findInDocument: { run: reading.find, enabled: hasDoc },
     searchAllFiles: { run: view.searchAll },
     viewRead: { run: () => view.setView('read'), enabled: hasDoc },
     viewSplit: { run: () => view.setView('split'), enabled: hasDoc },
     viewEdit: { run: () => view.setView('edit'), enabled: hasDoc },
     toggleReadEdit: { run: view.toggleReadEdit, enabled: hasDoc },
     toggleSidebar: { run: view.toggleSidebar },
-    toggleOutline: { run: view.toggleOutline, enabled: hasDoc },
-    toggleStatusBar: { run: view.toggleStatusBar },
-    focusMode: { run: view.toggleFocus },
+    toggleOutline: {
+      // Below the outline breakpoint there's no room for it: say so instead of a silent toggle.
+      run: () => (s().narrow ? host.toast('Make the window wider to show the outline.') : view.toggleOutline()),
+      enabled: hasDoc
+    },
+    toggleStatusBar: {
+      run: view.toggleStatusBar,
+      label: () => (s().showStatusBar ? 'Hide status bar' : 'Show status bar')
+    },
+    focusMode: { run: view.toggleFocus, label: () => (s().focusMode ? 'Leave focus mode' : 'Focus mode') },
     toggleTheme: { run: view.toggleTheme },
     themeLight: { run: () => view.setTheme('light') },
     themeDark: { run: () => view.setTheme('dark') },
@@ -73,8 +98,18 @@ export function buildCommandTable({ host, docs, files, view, exports, renameTarg
     textBigger: { run: () => view.textSize(1) },
     textSmaller: { run: () => view.textSize(-1) },
     textReset: { run: () => view.textSize('reset') },
-    toggleSyncScroll: { run: view.toggleSyncScroll },
-    toggleRemoteImages: { run: view.toggleRemoteImages },
+    toggleSyncScroll: {
+      run: view.toggleSyncScroll,
+      label: () => (s().syncScroll ? 'Turn off synced scrolling' : 'Turn on synced scrolling')
+    },
+    toggleRemoteImages: {
+      run: view.toggleRemoteImages,
+      label: () => (s().blockRemoteImages ? 'Allow remote images' : 'Block remote images')
+    },
+    nextChange: { run: reading.nextChange, enabled: changesShown },
+    dismissChanges: { run: reading.dismissChanges, enabled: changesShown },
+    // Following only makes sense for a file something else can grow.
+    followEnd: { run: reading.followEnd, enabled: hasFile },
     rename: {
       run: () => {
         const t = renameTarget()
@@ -85,6 +120,7 @@ export function buildCommandTable({ host, docs, files, view, exports, renameTarg
       enabled: () => hasDoc() || renameTarget() !== null
     },
     duplicate: { run: () => void files.duplicate(active()), enabled: hasFile },
+    openAllWorkspaceFiles: { run: files.openWorkspaceFiles, enabled: () => s().tree.length > 0 },
     newFileInFolder: {
       run: () => void files.newFileIn(inWorkspace() ? dirOf(active()) : (s().root ?? '')),
       enabled: () => !!s().root

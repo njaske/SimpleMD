@@ -38,6 +38,12 @@ export type DialogState =
   | { kind: 'rename'; path: string; isFolder: boolean }
   | { kind: 'newFolder'; parent: string }
 
+/** Find in document: open with this seed; a new key re-seeds an open bar. */
+export interface FindState {
+  seed: string
+  key: number
+}
+
 export interface RenameState {
   path: string
   isFolder: boolean
@@ -110,4 +116,13 @@ export interface AppState {
   renaming: RenameState | null
   recovery: RecoveryEntry[] | null
   recentCommands: CommandId[]
+  /** The reader's find bar (Read and Split). */
+  find: FindState | null
+  /** "Fixed for display" repairs in the active document's last paint. */
+  renderFixes: string[]
+  /** Remote images "Block remote images" held back in the active document. */
+  blockedImages: number
+  /** "What changed" since a document reloaded from disk: blocks marked (or line
+   *  ranges, until the reader has painted the document), by document id. */
+  changes: Record<string, number>
 }

@@ -14,7 +14,8 @@ export interface SidebarProps {
   workspaceName: string
   resolvedTheme: ResolvedTheme
   hint: (shortcut: string) => string
-  onActivity: (a: Activity) => void
+  /** `focusField`: a click on Search, which puts the cursor in its field. */
+  onActivity: (a: Activity, focusField?: boolean) => void
   onNewDocument: () => void
   onQuickOpen: () => void
   onSettings: () => void

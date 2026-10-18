@@ -281,4 +281,42 @@ export function installDevApi(): void {
     }
   }
   ;(window as unknown as { api: Api }).api = api
+  ;(window as unknown as { __smdDev: DevHelpers }).__smdDev = devHelpers(contents, folders, changed)
+}
+
+/** Preview-only hooks that act like an agent writing into the sample folder. */
+export interface DevHelpers {
+  /** Append `text` to the file at `path`. */
+  appendToFile(path: string, text: string): void
+  /** Replace the first occurrence of `search` in the file at `path`. */
+  replaceInFile(path: string, search: string, replace: string): void
+  /** Create a new file `name` in `dir` (created when missing). */
+  addFile(dir: string, name: string, text: string): void
+}
+
+function devHelpers(contents: Record<string, string>, folders: Map<string, string[]>, changed: () => void): DevHelpers {
+  const existing = (path: string): string => {
+    const text = contents[path]
+    if (text === undefined) throw new Error(`No file at ${path}`)
+    return text
+  }
+  return {
+    appendToFile(path, text) {
+      contents[path] = existing(path) + text
+      changed()
+    },
+    replaceInFile(path, search, replace) {
+      const text = existing(path)
+      if (!text.includes(search)) throw new Error(`"${search}" isn't in ${path}`)
+      contents[path] = text.replace(search, replace)
+      changed()
+    },
+    addFile(dir, name, text) {
+      const path = joinPath(dir, name)
+      if (contents[path] !== undefined) throw new Error(`${path} already exists`)
+      contents[path] = text
+      folders.set(dir, [...(folders.get(dir) ?? []), name])
+      changed()
+    }
+  }
 }

@@ -36,9 +36,6 @@ export interface MenuDeps {
 const SEP: MenuEntry = { separator: true }
 const ICON = 15
 
-/** Accessible names of the top-bar menus (also how the bar knows which one is open). */
-export const DOC_MENU = 'Document actions'
-export const TAB_LIST = 'Open tabs'
 
 /** Every open tab, for the strip's overflow button: the active one is checked. */
 export function tabListMenu({ host, docs }: MenuDeps, nameOf: (id: string) => string): MenuEntry[] {

@@ -49,6 +49,7 @@ export type CommandId =
   | 'dismissChanges'
   | 'followEnd'
   | 'reloadFromDisk'
+  | 'openAllWorkspaceFiles'
   | 'rename'
   | 'duplicate'
   | 'newFileInFolder'
@@ -165,6 +166,12 @@ export const COMMANDS: readonly CommandSpec[] = [
   { id: 'followEnd', label: 'Follow end of file', group: 'Reading', keywords: 'tail agent live' },
 
   { id: 'rename', label: 'Rename…', group: 'Files', shortcuts: ['F2'] },
+  {
+    id: 'openAllWorkspaceFiles',
+    label: 'Open all files in the folder',
+    group: 'Files',
+    keywords: 'tabs workspace every'
+  },
   { id: 'duplicate', label: 'Duplicate', group: 'Files', keywords: 'copy' },
   { id: 'newFileInFolder', label: 'New file in folder', group: 'Files' },
   { id: 'newFolder', label: 'New folder', group: 'Files' },

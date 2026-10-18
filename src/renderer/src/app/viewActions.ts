@@ -39,8 +39,26 @@ export function createViewActions(host: AppHost) {
       focusSidebar
     )
 
-  const setActivity = (activity: Activity): void =>
+  /** Show the Search panel and put the cursor in its field. */
+  const searchAll = (): void => {
+    host.update(
+      (s) => ({ activity: 'search', sidebarOpen: true, sidebarPeek: s.compact, focusMode: false }),
+      () => {
+        requestAnimationFrame(() => {
+          const input = document.getElementById(SEARCH_INPUT_ID) as HTMLInputElement | null
+          input?.focus()
+          input?.select()
+        })
+      }
+    )
+  }
+
+  /** Clicking Search in the switcher puts the cursor in its field, like Mod+Shift+F
+   *  (arrow keys keep moving through the switcher instead). */
+  const setActivity = (activity: Activity, focusField = false): void => {
+    if (activity === 'search' && focusField) return searchAll()
     host.update((s) => ({ activity, sidebarOpen: true, sidebarPeek: s.compact }))
+  }
 
   /** Focus mode hides the outline, so asking for it there leaves focus mode. */
   const toggleOutline = (): void =>
@@ -73,20 +91,6 @@ export function createViewActions(host: AppHost) {
 
   const openSettings = (section: SettingsSection = 'appearance'): void =>
     host.update({ settings: section, menu: null, readingOpen: false, palette: null })
-
-  /** Show the Search panel and put the cursor in its field. */
-  const searchAll = (): void => {
-    host.update(
-      (s) => ({ activity: 'search', sidebarOpen: true, sidebarPeek: s.compact, focusMode: false }),
-      () => {
-        requestAnimationFrame(() => {
-          const input = document.getElementById(SEARCH_INPUT_ID) as HTMLInputElement | null
-          input?.focus()
-          input?.select()
-        })
-      }
-    )
-  }
 
   return {
     setView,

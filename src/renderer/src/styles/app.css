@@ -233,11 +233,17 @@ button.smd-chip:hover { color: var(--fg); border-color: var(--border-strong); }
 .smd-row-ext { color: var(--fg-faint); font-weight: 400; }
 /* --fg-faint is tuned for plain surfaces; the tinted active row needs the stronger grey. */
 .smd-row.is-active .smd-row-ext { color: var(--fg-muted); }
-.smd-row-pin { flex: none; color: var(--accent-fg); }
+/* Pins are a quiet bookmark; the accent belongs to "New" so the two never read alike. */
+.smd-row-pin { flex: none; color: var(--fg-faint); }
 .smd-row .smd-iconbtn { display: none; }
 .smd-row:hover .smd-iconbtn, .smd-row:focus-within .smd-iconbtn { display: inline-flex; }
 .smd-row:hover .smd-row-pin, .smd-row:focus-within .smd-row-pin { display: none; }
-.smd-new-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2.5px var(--accent-soft); }
+/* "New" sits right after the name; the row's right edge stays for pin and actions. */
+.smd-row-name:has(+ .smd-new-chip) { flex: 0 1 auto; }
+.smd-new-chip {
+  flex: none; margin-right: auto; height: 16px; padding: 0 6px; border-radius: 999px; display: inline-flex; align-items: center;
+  background: var(--accent-soft); color: var(--accent-fg); font-size: 10.5px; font-weight: 600; letter-spacing: .02em;
+}
 .smd-row--rename { padding-right: 4px; }
 .smd-rename-input {
   flex: 1; min-width: 0; height: 24px; padding: 0 6px; margin-left: -6px; border-radius: 5px;
@@ -664,6 +670,13 @@ button.smd-chip:hover { color: var(--fg); border-color: var(--border-strong); }
 }
 .smd-toast-action:hover { background: color-mix(in srgb, var(--bg) 20%, transparent); }
 .smd-toast-action:focus-visible { outline-color: var(--bg); }
+.smd-toast--action { padding-right: 4px; }
+.smd-toast-close {
+  flex: none; width: 26px; height: 26px; margin-left: -6px; border: 0; border-radius: 7px; display: inline-flex;
+  align-items: center; justify-content: center; background: transparent; color: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+.smd-toast-close:hover { color: var(--bg); background: color-mix(in srgb, var(--bg) 14%, transparent); }
+.smd-toast-close:focus-visible { outline-color: var(--bg); }
 
 .smd-drop {
   position: fixed; inset: 0; z-index: 120; pointer-events: none; display: flex; align-items: center; justify-content: center;
@@ -679,7 +692,8 @@ button.smd-chip:hover { color: var(--fg); border-color: var(--border-strong); }
 .smd-drop-sub { font-size: 13px; color: var(--fg-muted); }
 
 .smd-changebar {
-  position: absolute; top: 12px; left: 50%; z-index: 6; transform: translateX(-50%);
+  /* Centred with margins, not a transform: the entry animation owns `transform`. */
+  position: absolute; top: 12px; left: 0; right: 0; margin: 0 auto; width: max-content; max-width: calc(100% - 24px); z-index: 6;
   display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 5px 0 12px; border-radius: 10px;
   background: var(--bg-elev); border: 1px solid var(--border); box-shadow: var(--shadow-1); font-size: 12.5px; color: var(--fg);
   animation: smdRise var(--dur-med) var(--ease-out); white-space: nowrap;
@@ -703,3 +717,25 @@ button.smd-chip:hover { color: var(--fg); border-color: var(--border-strong); }
 @media (max-width: 1099px) {
   .smd-sidebar { width: 236px; }
 }
+
+/* ===== Document panes: loading slots, find + change bars, fixes popover ===== */
+
+/* Hold the format bar's line while its chunk loads (no jump when it arrives). */
+.smd-formatbar--loading { flex: none; height: 36px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.smd-editor--loading { height: 100%; background: var(--bg); }
+.smd-editor-failed { margin: 48px auto; max-width: 420px; padding: 0 16px; text-align: center; font-size: 13px; line-height: 1.5; color: var(--fg-muted); }
+
+/* With the find bar open (top-right), the change bar tucks in right under it. */
+.smd-reader-pane:has(.smd-findbar) .smd-changebar { top: 58px; left: auto; right: 18px; margin: 0; }
+
+.smd-fixes { position: relative; display: flex; }
+.smd-fixes-pop {
+  position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 40; width: max-content; max-width: min(360px, calc(100vw - 32px));
+  padding: 12px 14px; border-radius: var(--radius-m); background: var(--bg-elev); border: 1px solid var(--border);
+  box-shadow: var(--shadow-2); color: var(--fg); font-size: 12.5px; line-height: 1.45; white-space: normal;
+  transform-origin: bottom right;
+}
+.smd-fixes-lead { margin: 0 0 8px; color: var(--fg-muted); }
+.smd-fixes-pop ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.smd-fixes-pop li::marker { color: var(--accent-fg); }
+.smd-status-stats { white-space: nowrap; }

@@ -4,7 +4,7 @@
 import type { DropResult, FolderScan, OpenedFile } from '@shared/types'
 import { ensureMdExtension, isMarkdownName, validateFileName } from '@/lib/logic/files'
 import { trashName } from '@/lib/logic/platform'
-import type { AppHost } from './host'
+import type { AppHost, DiskReload, ReloadHook } from './host'
 import { reason } from './host'
 import type { DocumentActions } from './documents'
 import {
@@ -20,7 +20,6 @@ import {
   mergeScanDocs,
   namesIn,
   pushRecents,
-  reconcileNote,
   reconcileScan,
   remapPaths,
   remapTree,
@@ -30,11 +29,17 @@ import {
   without
 } from './model'
 import type { DocSlice } from './model'
+import type { AppState } from './types'
 
 /** "Open all" from the folder-opened toast still caps the strip. */
 const MAX_OPEN_ALL = 40
 
 export type FileActions = ReturnType<typeof createFileActions>
+
+export interface FileHooks {
+  /** Clean open documents are about to take new disk text (a rescan). */
+  onReload?: ReloadHook
+}
 
 interface ScanOptions {
   openAll?: boolean
@@ -42,6 +47,10 @@ interface ScanOptions {
   restoreTabs?: string[]
   restoreActive?: string | null
   availablePaths?: Set<string>
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 function plural(n: number, word: string): string {
@@ -66,6 +75,15 @@ function tabsForScan(scan: FolderScan, opts: ScanOptions): { openTabs: string[] 
   return { openTabs, activeId }
 }
 
+/** The sidebar group a file's row lives in (its folder, or its loose-file group). */
+function groupOf(s: Pick<AppState, 'tree' | 'looseFiles'>, path: string): string | null {
+  return (
+    s.tree.find((f) => f.files.some((x) => x.path === path))?.id ??
+    s.looseFiles.find((f) => f.path === path)?.dir ??
+    null
+  )
+}
+
 function fileCount(scan: FolderScan): number {
   return scan.tree.reduce((sum, f) => sum + f.files.length, 0)
 }
@@ -76,7 +94,12 @@ function openedNote(scan: FolderScan): string {
   return n > 0 ? `Opened ${plural(n, 'Markdown file')}` : `${scan.name} has no Markdown files yet`
 }
 
-export function createFileActions(host: AppHost, docs: () => DocumentActions) {
+/** Unsaved documents whose disk copy changed in this rescan (not flagged before). */
+function newConflicts(before: Record<string, boolean>, after: Record<string, boolean>): string[] {
+  return Object.keys(after).filter((id) => after[id] && !before[id])
+}
+
+export function createFileActions(host: AppHost, docs: () => DocumentActions, hooks: FileHooks = {}) {
   let scanning = false
   let rescanQueued = false
 
@@ -254,7 +277,14 @@ export function createFileActions(host: AppHost, docs: () => DocumentActions) {
     }
     if (!scan || scan.root !== host.state().root) return
     const fresh = scan
-    const result = reconcileScan(host.state(), fresh)
+    const before = host.state()
+    const result = reconcileScan(before, fresh)
+    const reloads: DiskReload[] = result.reloaded.map((id) => ({
+      id,
+      before: before.contents[id] ?? '',
+      after: fresh.contents[id] ?? ''
+    }))
+    const afterReload = reloads.length && hooks.onReload ? hooks.onReload(reloads) : undefined
     host.update((s) => {
       const r = reconcileScan(s, fresh)
       const newPaths = { ...s.newPaths }
@@ -270,9 +300,24 @@ export function createFileActions(host: AppHost, docs: () => DocumentActions) {
         newPaths,
         emptyFolders
       }
-    })
-    const note = reconcileNote(result)
-    if (note) host.toast(note)
+    }, afterReload)
+    // Only tabs that closed are news; files nobody had open (or SimpleMD itself just
+    // moved to the bin) vanish from the tree quietly.
+    const closedTabs = before.openTabs.filter((id) => before.contents[id] !== undefined && !result.openTabs.includes(id))
+    reconcileToast(before.activeId, newConflicts(before.externalChanges, result.externalChanges), closedTabs)
+  }
+
+  /** Background reloads stay quiet (the change bar and the tree's "new" dot tell
+   *  that story); only removals and new conflicts in other tabs are worth a toast. */
+  const reconcileToast = (activeId: string | null, conflicts: string[], closedTabs: string[]): void => {
+    const elsewhere = conflicts.filter((id) => id !== activeId && host.state().openTabs.includes(id))
+    if (elsewhere.length) {
+      const which = elsewhere.length === 1 ? host.nameOf(elsewhere[0]) : plural(elsewhere.length, 'document')
+      host.toast(`${which} changed on disk while you had unsaved edits. Open it to choose which version to keep.`)
+      return
+    }
+    if (closedTabs.length === 1) host.toast(`${baseName(closedTabs[0])} was deleted or moved on disk, so its tab closed.`)
+    else if (closedTabs.length > 1) host.toast(`${closedTabs.length} open files were deleted or moved on disk, so their tabs closed.`)
   }
 
   // ---- names --------------------------------------------------------------------
@@ -295,31 +340,20 @@ export function createFileActions(host: AppHost, docs: () => DocumentActions) {
     return clash ? `There's already a file named ${target} here` : null
   }
 
-  /** The sidebar group a file's row lives in (its folder, or its loose-file group). */
-  const groupOf = (path: string): string | null => {
-    const s = host.state()
-    return (
-      s.tree.find((f) => f.files.some((x) => x.path === path))?.id ??
-      s.looseFiles.find((f) => f.path === path)?.dir ??
-      null
-    )
-  }
-
-  const startRename = (path: string, isFolder: boolean): void => {
-    const s = host.state()
-    const treeShown = s.sidebarOpen && !s.focusMode && s.activity === 'files' && !s.compact
-    const group = isFolder ? null : groupOf(path)
-    if (!treeShown || (!isFolder && !group)) {
-      host.update({ dialog: { kind: 'rename', path, isFolder }, menu: null })
-      return
-    }
-    // The inline field only exists in an expanded folder, so open the folder first.
-    host.update((st) => ({
-      renaming: { path, isFolder },
-      menu: null,
-      expanded: group ? { ...st.expanded, [group]: true } : st.expanded
-    }))
-  }
+  /** Inline in the tree when its row is on screen, else a small dialog. Decided on the
+   *  freshest state: a file created a moment ago may not be in host.state() yet. */
+  const startRename = (path: string, isFolder: boolean): void =>
+    host.update((s) => {
+      const treeShown = s.sidebarOpen && !s.focusMode && s.activity === 'files' && !s.compact
+      const group = isFolder ? null : groupOf(s, path)
+      if (!treeShown || (!isFolder && !group)) return { dialog: { kind: 'rename', path, isFolder }, menu: null }
+      // The inline field only exists in an expanded folder, so open the folder first.
+      return {
+        renaming: { path, isFolder },
+        menu: null,
+        expanded: group ? { ...s.expanded, [group]: true } : s.expanded
+      }
+    })
 
   const commitRename = async (path: string, name: string, isFolder: boolean): Promise<void> => {
     host.update({ renaming: null, dialog: null })
@@ -437,9 +471,11 @@ export function createFileActions(host: AppHost, docs: () => DocumentActions) {
       .catch((err: unknown) => fail(`Couldn't show ${baseName(path)}`, err, 'It may have been moved or deleted.'))
   }
 
+  /** The web clipboard refuses while the window isn't focused; the main process doesn't. */
   const copyPath = (path: string): void => {
     navigator.clipboard
       .writeText(path)
+      .catch(() => window.api.writeClipboardRich(escapeHtml(path), path))
       .then(() => host.toast('Path copied'))
       .catch(() => host.toast("Couldn't copy the path. Try again."))
   }
@@ -482,6 +518,7 @@ export function createFileActions(host: AppHost, docs: () => DocumentActions) {
     openFilesDialog,
     addLooseFiles,
     openResult,
+    openWorkspaceFiles,
     reconcileFolder,
     refreshRecentFolders,
     validateName,

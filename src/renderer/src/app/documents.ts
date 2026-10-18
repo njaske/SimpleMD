@@ -2,7 +2,7 @@
 // unsaved-changes prompt / reopen closed tab. Every IPC call reports failure with
 // a toast that says what happened and what to do.
 import { normalizePastedMarkdown, suggestFileName } from '@/lib/logic/files'
-import type { AppHost } from './host'
+import type { AppHost, ReloadHook } from './host'
 import { reason } from './host'
 import {
   adoptSavedAs,
@@ -24,6 +24,8 @@ import type { AppState } from './types'
 export interface DocumentDeps {
   /** Re-scan the workspace (a file was saved into it). */
   rescan: () => void
+  /** A clean document is about to take its disk text (Reload from disk). */
+  onReload?: ReloadHook
 }
 
 export type DocumentActions = ReturnType<typeof createDocumentActions>
@@ -232,11 +234,20 @@ export function createDocumentActions(host: AppHost, deps: DocumentDeps) {
   const readFromDisk = async (id: string): Promise<void> => {
     try {
       const text = await window.api.readFile(id)
-      host.update((s) => ({
-        contents: { ...s.contents, [id]: text },
-        saved: { ...s.saved, [id]: text },
-        externalChanges: without(s.externalChanges, id)
-      }))
+      // Only a clean document gets "what changed" marks: discarded edits aren't news.
+      const s0 = host.state()
+      const before = s0.contents[id]
+      const clean = before !== undefined && !isDirty(s0, id)
+      const after = clean && deps.onReload ? deps.onReload([{ id, before, after: text }]) : undefined
+      host.update(
+        (s) => ({
+          contents: { ...s.contents, [id]: text },
+          saved: { ...s.saved, [id]: text },
+          externalChanges: without(s.externalChanges, id)
+        }),
+        after
+      )
+      if (clean && before === text) host.toast(`${baseName(id)} is already up to date`)
     } catch (err) {
       fail(`Couldn't reload ${baseName(id)}`, err, 'It may have been moved or deleted.')
     }

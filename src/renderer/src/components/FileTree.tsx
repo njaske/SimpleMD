@@ -118,7 +118,11 @@ const FileRow = memo(function FileRow({ file, tabbable, depthClass, onOpenFile, 
         {stem}
         <span className="smd-row-ext">{ext}</span>
       </span>
-      {file.isNew && <span className="smd-new-dot" title="New since you opened the folder" />}
+      {file.isNew && (
+        <span className="smd-new-chip" title="New since you opened the folder" aria-hidden="true">
+          New
+        </span>
+      )}
       {file.pinned && <BookmarkFill size={11} className="smd-row-pin" />}
       <button
         type="button"

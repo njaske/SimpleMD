@@ -46,6 +46,35 @@ function useClip(ref: RefObject<HTMLDivElement | null>, count: number): Clip {
   return clip
 }
 
+/** Breathing room kept between the active tab and a clipped (faded) edge. */
+const EDGE_ROOM = 24
+
+/** Scroll the strip just enough to show the whole active tab. */
+function revealActive(strip: HTMLElement): void {
+  const tab = strip.querySelector<HTMLElement>('.smd-tab.is-active')
+  if (!tab) return
+  const box = strip.getBoundingClientRect()
+  const r = tab.getBoundingClientRect()
+  if (r.left < box.left) strip.scrollLeft -= box.left - r.left + EDGE_ROOM
+  else if (r.right > box.right) strip.scrollLeft += r.right - box.right + EDGE_ROOM
+}
+
+/** The active tab stays fully in view when it changes, when its label grows (an
+ *  untitled title, a rename, the unsaved dot) and when the strip is resized. */
+function useKeepActiveVisible(ref: RefObject<HTMLDivElement | null>, activeId: string | undefined, label: string): void {
+  useLayoutEffect(() => {
+    const strip = ref.current
+    if (strip) revealActive(strip)
+  }, [ref, activeId, label])
+  useEffect(() => {
+    const strip = ref.current
+    if (!strip) return
+    const ro = new ResizeObserver(() => revealActive(strip))
+    ro.observe(strip)
+    return () => ro.disconnect()
+  }, [ref])
+}
+
 /** A vertical wheel scrolls the strip sideways (most mice have no horizontal wheel). */
 function onWheel(e: WheelEvent<HTMLDivElement>): void {
   if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
@@ -57,14 +86,13 @@ function onWheel(e: WheelEvent<HTMLDivElement>): void {
 // the clipped edges fade and a chevron lists every tab.
 function Tabs({ tabs, onSelect, onClose, onContext, onNew, newLabel, onList, listOpen }: Props) {
   const ref = useRef<HTMLDivElement>(null)
-  const activeId = tabs.find((t) => t.active)?.id
+  const active = tabs.find((t) => t.active)
+  const activeId = active?.id
+  const activeLabel = active ? `${active.label}${active.dirty ? '*' : ''}` : ''
   const clip = useClip(ref, tabs.length)
   const overflowing = clip.start || clip.end
 
-  useEffect(() => {
-    const el = ref.current?.querySelector<HTMLElement>('.smd-tab.is-active')
-    el?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  }, [activeId])
+  useKeepActiveVisible(ref, activeId, activeLabel)
 
   const focusTab = (index: number): void => {
     const all = ref.current?.querySelectorAll<HTMLElement>('[role="tab"]')

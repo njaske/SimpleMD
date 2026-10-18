@@ -14,7 +14,8 @@ export interface SegmentOption<T extends string | number> {
 interface Props<T extends string | number> {
   options: readonly SegmentOption<T>[]
   value: T
-  onChange: (value: T) => void
+  /** `pointer` is true for a mouse/touch click (arrow keys and Enter/Space are not). */
+  onChange: (value: T, pointer: boolean) => void
   label: string
   /** Stretch to the container width. */
   block?: boolean
@@ -33,7 +34,7 @@ export default function Segmented<T extends string | number>({ options, value, o
     if (!delta) return
     e.preventDefault()
     const next = (index + delta + options.length) % options.length
-    onChange(options[next].value)
+    onChange(options[next].value, false)
     ref.current?.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus()
   }
 
@@ -55,7 +56,7 @@ export default function Segmented<T extends string | number>({ options, value, o
           tabIndex={i === index ? 0 : -1}
           className="smd-seg"
           title={o.title}
-          onClick={() => onChange(o.value)}
+          onClick={(e) => onChange(o.value, e.detail > 0)}
         >
           {o.label}
         </button>
