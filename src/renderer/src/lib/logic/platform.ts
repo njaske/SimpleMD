@@ -266,7 +266,9 @@ function matchesSymbol(
   if (group.chars.includes(key)) return e.shiftKey || !s.shift
   if (e.shiftKey !== s.shift || !e.code || !group.codes.includes(e.code)) return false
   if (isAltGrText(e, key, platform)) return false
-  // Physical-key match, unless the key typed a different bindable symbol on this layout
-  // (German Ctrl+"-" sits on the US "/" key and must stay "Mod+-").
-  return !GROUP_OF_CHAR.has(key)
+  // Physical-key match, unless an unshifted key typed a different bindable symbol on this
+  // layout (German Ctrl+"-" sits on the US "/" key and must stay "Mod+-"). With Shift the
+  // key names the shortcut ("Mod+Shift+7" where Shift+7 types "/"); if that overlaps
+  // another shortcut, the caller's priority (editor first) settles it.
+  return s.shift || !GROUP_OF_CHAR.has(key)
 }

@@ -113,10 +113,81 @@ function splitFrontMatter(text: string): { body: string; title: string | null } 
   return { body: text.slice(m[0].length), title: title || null }
 }
 
-const ESCAPED_PUNCTUATION = /\\([\\`*_{}[\]()#+\-.!|~<>])/g
-/** Escaped characters ride through the stripping as private-use stand-ins (U+E000 + code). */
-const PROTECT_BASE = 0xe000
-const PROTECTED = /[\uE000-\uE07F]/g
+/** Escaped punctuation ("\*") or a backtick run: the two ways text becomes literal. */
+const LITERAL_TOKEN = /\\([\\`*_{}[\]()#+\-.!|~<>])|`+/g
+const PRIVATE_USE_START = 0xe000
+
+/** A private-use character `line` doesn't contain, to mark hidden text with. Only codes
+ *  the line really uses are skipped, so text that holds such characters (Nerd Font icons)
+ *  comes back unchanged. */
+function unusedSentinel(line: string): string {
+  const used = new Set<number>()
+  for (let i = 0; i < line.length; i++) {
+    const code = line.charCodeAt(i)
+    if (code >= PRIVATE_USE_START) used.add(code)
+  }
+  let code = PRIVATE_USE_START
+  while (used.has(code)) code++
+  return String.fromCharCode(code)
+}
+
+/** Start of every backtick run in `line`, grouped by run length, ascending. */
+function backtickRuns(line: string): Map<number, number[]> {
+  const runs = new Map<number, number[]>()
+  for (const m of line.matchAll(/`+/g)) {
+    const starts = runs.get(m[0].length)
+    if (starts) starts.push(m.index ?? 0)
+    else runs.set(m[0].length, [m.index ?? 0])
+  }
+  return runs
+}
+
+/** The first of the ascending `starts` at or after `from`, or -1. */
+function firstAtOrAfter(starts: readonly number[], from: number): number {
+  let lo = 0
+  let hi = starts.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (starts[mid] < from) lo = mid + 1
+    else hi = mid
+  }
+  return lo < starts.length ? starts[lo] : -1
+}
+
+interface Hidden {
+  text: string
+  /** `stripped` with the hidden pieces put back. */
+  restore: (stripped: string) => string
+}
+
+/** `line` with code spans and escaped characters swapped for placeholders, so stripping
+ *  can't touch them ("`__init__`" keeps its underscores). A code span is a backtick run
+ *  closed by the next run of the same length; inside it backslashes are literal. Runs are
+ *  indexed up front so a line of unmatched runs stays linear. */
+function hideLiterals(line: string): Hidden {
+  const sentinel = unusedSentinel(line)
+  const pieces: string[] = []
+  const hide = (piece: string): string => `${sentinel}${pieces.push(piece) - 1}${sentinel}`
+  const runs = backtickRuns(line)
+  const token = new RegExp(LITERAL_TOKEN.source, 'g')
+  let text = ''
+  let last = 0
+  for (let m = token.exec(line); m; m = token.exec(line)) {
+    const after = token.lastIndex
+    const isEscape = m[1] !== undefined
+    const close = isEscape ? after : firstAtOrAfter(runs.get(m[0].length) ?? [], after)
+    // A run nothing closes is plain text.
+    if (close < 0) continue
+    text += line.slice(last, m.index) + hide(isEscape ? m[1] : line.slice(after, close))
+    last = isEscape ? after : close + m[0].length
+    token.lastIndex = last
+  }
+  const placeholder = new RegExp(`${sentinel}(\\d+)${sentinel}`, 'g')
+  return {
+    text: text + line.slice(last),
+    restore: (stripped) => stripped.replace(placeholder, (_, i: string) => pieces[Number(i)] ?? '')
+  }
+}
 
 // Spans below are capped in length so a line full of unclosed openers ("[", "<", "**")
 // stays linear instead of rescanning to the end for each one. Real spans are far shorter.
@@ -138,60 +209,80 @@ const LINK_TAIL = String.raw`(?:\((?:[^()]|\([^()]*\))*\)|\[[^[\]]{0,500}\])`
 const IMAGE = new RegExp(String.raw`!\[([^[\]]{0,500})\]` + LINK_TAIL, 'g')
 const LINK = new RegExp(String.raw`\[([^[\]]{0,500})\]` + LINK_TAIL, 'g')
 
-/** Block markers, links, images, HTML tags and code spans removed. */
-function stripStructure(line: string): string {
+/** Quote markers (with a callout's "[!NOTE]"), list and task markers and an ATX heading's
+ *  hashes removed from the start of a body line. Not used on heading text, where
+ *  "# 1. Introduction" keeps its number. */
+function stripBlockMarkers(line: string): string {
   return line
-    .replace(/^ {0,3}(?:>[ \t]?)+/, '')
+    .replace(/^ {0,3}(?:>[ \t]?)+(?:\[![\w-]+\][+-]?(?=[ \t]|$))?/, '')
     .replace(/^\s*(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?/, '')
-    .replace(/^ {0,3}#{1,6}[ \t]+/, '')
-    .replace(/[ \t]+#+[ \t]*$/, '')
+    .replace(/^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/, '$1')
+}
+
+/** Links and images reduced to their text; footnote refs and HTML tags dropped. */
+function stripLinksAndTags(text: string): string {
+  return text
     .replace(IMAGE, '$1')
     .replace(/\[\^[^[\]]{1,500}\]/g, '')
     .replace(LINK, '$1')
     .replace(/<((?:https?|mailto):[^<>\s]{1,2000})>/gi, '$1')
     .replace(/<\/?[a-z][^<>]{0,500}>/gi, '')
-    .replace(/(`+)(.{1,500}?)\1/g, '$2')
 }
 
-/** Inline Markdown and block markers removed, leaving the words a reader sees. */
-function stripMarkdown(line: string): string {
-  const protectedLine = line.replace(ESCAPED_PUNCTUATION, (_, c: string) => String.fromCharCode(PROTECT_BASE + c.charCodeAt(0)))
-  const unemphasized = EMPHASIS_SPANS.reduce((text, span) => text.replace(span, '$1'), stripStructure(protectedLine))
-  return unemphasized
+/** Inline Markdown removed, leaving the words a reader sees. Code spans and escaped
+ *  characters stay literal. With `cells`, table pipes (not escaped or in code) become spaces. */
+function stripInline(raw: string, cells = false): string {
+  const { text, restore } = hideLiterals(raw)
+  const flat = stripLinksAndTags(cells ? text.replace(/\|/g, ' ') : text)
+  const unemphasized = EMPHASIS_SPANS.reduce((t, span) => t.replace(span, '$1'), flat)
+  const plain = unemphasized
     .replace(/(^|[^\p{L}\p{N}_])_(?=[^\s_])(.{1,500}?)(?<=[^\s_])_(?![\p{L}\p{N}_])/gu, '$1$2')
     .replace(/^[*_~]+(?=\S)|(?<=\S)[*_~]+$/g, '')
     .replace(/&(?:amp|lt|gt|quot|apos|nbsp|#39);/g, (e) => ENTITIES.get(e) ?? e)
-    .replace(PROTECTED, (c) => String.fromCharCode(c.charCodeAt(0) - PROTECT_BASE))
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-/** Text of the first heading (ATX, setext or HTML) outside code blocks. */
-function firstHeading(lines: readonly string[]): string | null {
-  let fence: Fence | null = null
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    if (fence) {
-      if (isFenceClose(line, fence)) fence = null
-      continue
-    }
-    fence = fenceOpen(line)
-    if (fence) continue
-    const atx = ATX_HEADING.exec(line)
-    const html = atx ? null : HTML_HEADING.exec(line)
-    const setext = !atx && !html && line.trim() && !NOT_PARAGRAPH.test(line) &&
-      i + 1 < lines.length && SETEXT_UNDERLINE.test(lines[i + 1])
-    const raw = atx ? atx[1] ?? '' : html ? html[1] : setext ? line : null
-    const text = raw === null ? '' : stripMarkdown(raw)
-    if (text) return text
-  }
-  return null
+  return restore(plain).replace(/\s+/g, ' ').trim()
 }
 
 /** True for lines that carry no readable words (rules, fences, table dividers, link defs). */
 function isSyntaxOnly(line: string): boolean {
   return THEMATIC_BREAK.test(line) || TABLE_DIVIDER.test(line) || LINK_DEFINITION.test(line) ||
     SETEXT_UNDERLINE.test(line)
+}
+
+function isParagraphLine(line: string): boolean {
+  return line.trim() !== '' && !NOT_PARAGRAPH.test(line) && !isSyntaxOnly(line)
+}
+
+/** Raw text of a heading on line `i`: ATX, HTML, or setext, which takes the whole
+ *  paragraph from `paraStart` through `i` when the next line underlines it. */
+function headingAt(lines: readonly string[], i: number, paraStart: number): string | null {
+  const line = lines[i]
+  const atx = ATX_HEADING.exec(line)
+  if (atx) return atx[1] ?? ''
+  const html = HTML_HEADING.exec(line)
+  if (html) return html[1]
+  const underlined = i + 1 < lines.length && SETEXT_UNDERLINE.test(lines[i + 1])
+  return underlined && isParagraphLine(line) ? lines.slice(paraStart, i + 1).join(' ') : null
+}
+
+/** Text of the first heading (ATX, setext or HTML) outside code blocks. */
+function firstHeading(lines: readonly string[]): string | null {
+  let fence: Fence | null = null
+  // First line of the paragraph the current line continues.
+  let paraStart = 0
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (fence) {
+      if (isFenceClose(line, fence)) fence = null
+      paraStart = i + 1
+      continue
+    }
+    fence = fenceOpen(line)
+    const raw = fence ? null : headingAt(lines, i, paraStart)
+    const text = raw === null ? '' : stripInline(raw)
+    if (text) return text
+    if (raw !== null || !isParagraphLine(line)) paraStart = i + 1
+  }
+  return null
 }
 
 /** The first line with readable words, preferring prose over code. */
@@ -207,7 +298,7 @@ function firstTextLine(lines: readonly string[]): string | null {
     fence = fenceOpen(line)
     if (fence) continue
     if (isSyntaxOnly(line)) continue
-    const text = stripMarkdown(line.replace(/\|/g, ' '))
+    const text = stripInline(stripBlockMarkers(line), true)
     if (text) return text
   }
   return firstCode
@@ -285,7 +376,8 @@ const DEFAULT_TITLE_LENGTH = 48
  *  with Markdown syntax (#, *, _, `, [](), >, list markers, front matter) stripped,
  *  whitespace collapsed and cut to `maxLength` characters on a word boundary with "…".
  *  Null for an empty document. A front-matter `title:` is used when there is no heading,
- *  and code blocks only supply the title when the document has nothing else. */
+ *  and code blocks only supply the title when the document has nothing else. Text inside
+ *  code spans stays as written, and a callout's "[!NOTE]" marker is skipped. */
 export function titleFromMarkdown(md: string, maxLength = DEFAULT_TITLE_LENGTH): string | null {
   const title = rawTitle(md)
   if (!title) return null
@@ -390,12 +482,115 @@ function outsideInlineCode(line: string, fn: (text: string) => string): string {
   return out + fn(line.slice(last))
 }
 
+const HTML_CODE_OPEN = /<code\b[^>]*>/gi
+const HTML_CODE_CLOSE = /<\/code\s*>/gi
+
+/** Apply `fn` to the parts of `line` outside code: `<code>…</code>` elements and inline
+ *  code spans. Stops looking once an opener has no closer, so no line is rescanned. */
+function outsideCode(line: string, fn: (text: string) => string): string {
+  const open = new RegExp(HTML_CODE_OPEN.source, 'gi')
+  const close = new RegExp(HTML_CODE_CLOSE.source, 'gi')
+  let out = ''
+  let from = 0
+  for (;;) {
+    open.lastIndex = from
+    const start = open.exec(line)
+    close.lastIndex = start ? open.lastIndex : 0
+    const end = start ? close.exec(line) : null
+    if (!start || !end) return out + outsideInlineCode(line.slice(from), fn)
+    out += outsideInlineCode(line.slice(from, start.index), fn) + line.slice(start.index, close.lastIndex)
+    from = close.lastIndex
+  }
+}
+
+/** Column width of leading whitespace, with tabs to the next multiple of 4. */
+function indentWidth(line: string): number {
+  let width = 0
+  for (const ch of line) {
+    if (ch === ' ') width++
+    else if (ch === '\t') width += 4 - (width % 4)
+    else break
+  }
+  return width
+}
+
+const LIST_ITEM = /^([ \t]*(?:[-*+]|\d{1,9}[.)]))([ \t]+|$)/
+/** HTML blocks whose contents are raw text (CommonMark's first kind of HTML block). */
+const RAW_HTML_OPEN = /^ {0,3}<(pre|script|style|textarea|code)(?=[\s>]|$)/i
+
+/** Column where a list item's text starts ("- a" → 2, "10.  b" → 5), or -1 for no item. */
+function listContentIndent(line: string): number {
+  const m = LIST_ITEM.exec(line)
+  if (!m || THEMATIC_BREAK.test(line)) return -1
+  const marker = indentWidth(m[1].replace(/\S+$/, '')) + m[1].trim().length
+  const gap = indentWidth(`${' '.repeat(marker)}${m[2]}`) - marker
+  return gap >= 1 && gap <= 4 ? marker + gap : marker + 1
+}
+
+function closesRaw(line: string, tag: string): boolean {
+  return new RegExp(`</${tag}\\s*>`, 'i').test(line)
+}
+
+interface PasteState {
+  fence: Fence | null
+  /** Tag of the raw HTML block (<pre>, <script>…) being passed through, or null. */
+  rawTag: string | null
+  /** Indent of the indented code block being passed through; 0 outside one. */
+  codeIndent: number
+  /** Where list item text starts in the current list; 0 outside lists. */
+  listIndent: number
+  /** The last line was paragraph text, which an indented line continues (it's not code). */
+  afterParagraph: boolean
+}
+
+const PASTE_START: PasteState = { fence: null, rawTag: null, codeIndent: 0, listIndent: 0, afterParagraph: false }
+
+/** How a pasted line is treated: code is kept byte for byte, a fence opening also drops
+ *  the copy-button residue above it, and prose is cleaned. */
+type PasteLine = 'code' | 'fence' | 'prose'
+
+/** The state after a line that isn't code: lists and paragraphs, which decide whether
+ *  the next indented line is code. */
+function afterProse(s: PasteState, line: string): PasteState {
+  const blank = !line.trim()
+  const item = listContentIndent(line)
+  // Text back at the margin after a blank line ends the list; without one it continues it.
+  const leftList = !blank && item < 0 && !s.afterParagraph && indentWidth(line) < s.listIndent
+  const listIndent = item >= 0 ? item : leftList ? 0 : s.listIndent
+  const afterParagraph = !blank && !ATX_HEADING.test(line) && !THEMATIC_BREAK.test(line)
+  return { ...s, codeIndent: 0, listIndent, afterParagraph }
+}
+
+/** Classify `line` and return the state after it. Fenced code, raw HTML blocks such as
+ *  <pre>, and indented code (4 columns past the list's text, not continuing a paragraph)
+ *  are code. */
+function stepPaste(s: PasteState, line: string): { kind: PasteLine; next: PasteState } {
+  if (s.fence) return { kind: 'code', next: { ...s, fence: isFenceClose(line, s.fence) ? null : s.fence } }
+  if (s.rawTag) return { kind: 'code', next: { ...s, rawTag: closesRaw(line, s.rawTag) ? null : s.rawTag } }
+  const blank = !line.trim()
+  const indent = indentWidth(line)
+  if (s.codeIndent && (blank || indent >= s.codeIndent)) return { kind: 'code', next: s }
+  const base: PasteState = { ...s, codeIndent: 0, afterParagraph: false }
+  if (!blank && !s.afterParagraph && indent >= s.listIndent + 4) {
+    return { kind: 'code', next: { ...base, codeIndent: s.listIndent + 4 } }
+  }
+  const fence = fenceOpen(line)
+  if (fence) return { kind: 'fence', next: { ...base, fence } }
+  const raw = RAW_HTML_OPEN.exec(line)?.[1].toLowerCase()
+  // An inline <code>…</code> starting a line is prose with a code element in it.
+  if (raw && !(raw === 'code' && closesRaw(line, raw))) {
+    return { kind: 'code', next: { ...base, rawTag: closesRaw(line, raw) ? null : raw } }
+  }
+  return { kind: 'prose', next: afterProse(s, line) }
+}
+
 /** How many lines of `out` to keep: the run of copy-button lines that ends it goes, but
- *  only when the run really contains a Copy label (a language label above it goes too). */
-function keepBeforeResidue(out: readonly string[], lang: string): number {
+ *  only when the run really contains a Copy label (a language label above it goes too).
+ *  Lines before `floor` are code and never go. */
+function keepBeforeResidue(out: readonly string[], lang: string, floor: number): number {
   let k = out.length
   let sawCopy = false
-  while (k > 0) {
+  while (k > floor) {
     const line = out[k - 1].trim()
     const isCopy = COPY_RESIDUE.test(line)
     if (!isCopy && !HEADER_RESIDUE.test(line) && !(lang && line.toLowerCase() === lang)) break
@@ -418,28 +613,23 @@ function trimBlankEnds(lines: readonly string[]): string[] {
  *  non-breaking spaces outside code, and strip copy-button residue lines that some chat
  *  UIs put inside copied code ("Copy code", "Copy", "Copied!") when they sit directly
  *  above a fenced block. Never changes text inside fenced code blocks (a "Copy" line in
- *  code may be real code, such as a batch command) or inside inline code spans. The
- *  result ends with one newline, or is "" when nothing is left. */
+ *  code may be real code, such as a batch command), indented code blocks, raw HTML
+ *  blocks such as <pre>, inline code spans or <code> elements. The result ends with one
+ *  newline, or is "" when nothing is left. */
 export function normalizePastedMarkdown(text: string): string {
   const lines = text.replace(/\r\n?/g, '\n').replace(/^\uFEFF/, '').split('\n')
   // A local accumulator, grown and trimmed in place: copying it per line or per fence
   // would make big pastes quadratic.
   const out: string[] = []
-  let fence: Fence | null = null
+  let state = PASTE_START
+  // out.length after the last code line: residue is never taken out of code.
+  let codeEnd = 0
   for (const line of lines) {
-    if (fence) {
-      if (isFenceClose(line, fence)) fence = null
-      out.push(line)
-      continue
-    }
-    const open = fenceOpen(line)
-    if (open) {
-      out.length = keepBeforeResidue(out, open.lang)
-      out.push(line)
-      fence = open
-      continue
-    }
-    out.push(outsideInlineCode(line, cleanProse))
+    const { kind, next } = stepPaste(state, line)
+    state = next
+    if (kind === 'fence') out.length = keepBeforeResidue(out, next.fence?.lang ?? '', codeEnd)
+    out.push(kind === 'prose' ? outsideCode(line, cleanProse) : line)
+    if (kind !== 'prose') codeEnd = out.length
   }
   const kept = trimBlankEnds(out)
   return kept.length ? `${kept.join('\n')}\n` : ''

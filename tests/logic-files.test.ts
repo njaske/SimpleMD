@@ -196,6 +196,56 @@ describe('titleFromMarkdown', () => {
     assert.equal(titleFromMarkdown('# <span>Hi</span> there'), 'Hi there')
   })
 
+  it('keeps Markdown-looking text inside code spans literal', () => {
+    assert.equal(titleFromMarkdown('# The `__init__` method'), 'The __init__ method')
+    assert.equal(titleFromMarkdown('# Use `a*b*c` here'), 'Use a*b*c here')
+    assert.equal(titleFromMarkdown('# Use `[a](b)` syntax'), 'Use [a](b) syntax')
+    assert.equal(titleFromMarkdown('# Escapes `\\*` stay and `&amp;` too'), 'Escapes \\* stay and &amp; too')
+    assert.equal(suggestFileName('# The `__init__` method'), 'The __init__ method.md')
+  })
+
+  it('pairs code spans by run length and strips emphasis around them', () => {
+    assert.equal(titleFromMarkdown('# ``a`b`` and **`bold code`**'), 'a`b and bold code')
+    assert.equal(titleFromMarkdown('# [`fuzzy.ts`](src/fuzzy.ts) notes'), 'fuzzy.ts notes')
+    // An escaped backtick opens nothing, and a run with no partner is text.
+    assert.equal(titleFromMarkdown('# a \\`b` c'), 'a `b` c')
+    assert.equal(titleFromMarkdown('# lone ` tick'), 'lone ` tick')
+  })
+
+  it('keeps pipes inside code spans and escaped pipes in a table row', () => {
+    assert.equal(titleFromMarkdown('| `a|b` | c \\| d |\n|---|---|'), 'a|b c | d')
+  })
+
+  it('keeps private-use characters such as Nerd Font icons as they are', () => {
+    // Arrange: U+E000 and U+E05C sit where the old escape stand-ins lived
+    const icons = `${String.fromCharCode(0xe000)} Hello ${String.fromCharCode(0xe05c)} world`
+
+    // Act
+    const title = titleFromMarkdown(`# ${icons} \\*`)
+
+    // Assert
+    assert.equal(title, `${icons} *`)
+  })
+
+  it('keeps the number of a numbered heading', () => {
+    assert.equal(titleFromMarkdown('# 1. Introduction'), '1. Introduction')
+    assert.equal(titleFromMarkdown('## - dash first'), '- dash first')
+    assert.equal(titleFromMarkdown('Step 2) setup\n==='), 'Step 2) setup')
+  })
+
+  it('reads a setext heading over a paragraph of several lines', () => {
+    assert.equal(titleFromMarkdown('line one\nline two\n===\n\nbody'), 'line one line two')
+    assert.equal(titleFromMarkdown('intro\n\nfirst\nsecond\n---'), 'first second')
+    assert.equal(titleFromMarkdown('```\ncode\n```\nafter fence\n==='), 'after fence')
+  })
+
+  it('skips a callout marker and uses the callout text', () => {
+    assert.equal(titleFromMarkdown('> [!NOTE]\n> callout body'), 'callout body')
+    assert.equal(titleFromMarkdown('> [!WARNING]- Read this first\n> more'), 'Read this first')
+    assert.equal(suggestFileName('> [!TIP]\n> Use the palette'), 'Use the palette.md')
+    assert.equal(titleFromMarkdown('[!NOTE] not a callout'), '[!NOTE] not a callout')
+  })
+
   it('keeps underscores inside words', () => {
     assert.equal(titleFromMarkdown('# my_file_name and snake_case'), 'my_file_name and snake_case')
   })
@@ -424,6 +474,61 @@ describe('normalizePastedMarkdown', () => {
 
     // Act / Assert
     assert.equal(normalizePastedMarkdown(code), `\`\`\`py\nx${NBSP}=${ZWSP}1  \n\n\`\`\`\nafter \n`)
+  })
+
+  it('leaves indented code blocks untouched', () => {
+    // Arrange
+    const code = `text\n\n    indented${ZWSP}code\n\tx${NBSP}y\n\n    more${NBSP}\nafter${NBSP}`
+
+    // Act
+    const out = normalizePastedMarkdown(code)
+
+    // Assert
+    assert.equal(out, `text\n\n    indented${ZWSP}code\n\tx${NBSP}y\n\n    more${NBSP}\nafter \n`)
+  })
+
+  it('cleans an indented line that continues a paragraph or a list item', () => {
+    assert.equal(normalizePastedMarkdown(`para\n    lazy${NBSP}line`), 'para\n    lazy line\n')
+    assert.equal(normalizePastedMarkdown(`- item\n\n    more${NBSP}text`), '- item\n\n    more text\n')
+    assert.equal(normalizePastedMarkdown(`1. step\n\n    - sub${NBSP}item`), '1. step\n\n    - sub item\n')
+  })
+
+  it('treats text indented 4 past a list item as code', () => {
+    const md = `- item\n\n      code${NBSP}here`
+    assert.equal(normalizePastedMarkdown(md), `${md}\n`)
+  })
+
+  it('ends a list at text back on the margin after a blank line', () => {
+    const md = `- item\n\npara\n\n    code${NBSP}`
+    assert.equal(normalizePastedMarkdown(md), `${md}\n`)
+  })
+
+  it('leaves <pre>, <script> and multi-line <code> blocks untouched', () => {
+    // Arrange
+    const pre = `<pre>\nx${NBSP}y${ZWSP}\n</pre>\nafter${NBSP}`
+    const oneLine = `<pre>a${NBSP}b</pre>`
+    const code = `<code>\nz${NBSP}\n</code>`
+
+    // Act / Assert
+    assert.equal(normalizePastedMarkdown(pre), `<pre>\nx${NBSP}y${ZWSP}\n</pre>\nafter \n`)
+    assert.equal(normalizePastedMarkdown(oneLine), `${oneLine}\n`)
+    assert.equal(normalizePastedMarkdown(code), `${code}\n`)
+  })
+
+  it('leaves inline <code> elements untouched but cleans the text around them', () => {
+    const line = `a${NBSP}<code>x${NBSP}y</code>${NBSP}b <code class="k">p${ZWSP}</code>`
+    assert.equal(normalizePastedMarkdown(line), `a <code>x${NBSP}y</code> b <code class="k">p${ZWSP}</code>\n`)
+    assert.equal(normalizePastedMarkdown(`<code>open${NBSP} only`), `<code>open${NBSP} only\n`)
+  })
+
+  it('never takes copy-looking lines out of indented code above a fence', () => {
+    const md = 'Text\n\n    copy\n```\nx\n```'
+    assert.equal(normalizePastedMarkdown(md), `${md}\n`)
+  })
+
+  it('treats a 4-space indented fence as indented code', () => {
+    const md = `Text\n\n    \`\`\`\n    a${NBSP}\n    \`\`\`\nafter${NBSP}`
+    assert.equal(normalizePastedMarkdown(md), `Text\n\n    \`\`\`\n    a${NBSP}\n    \`\`\`\nafter \n`)
   })
 
   it('removes "Copy code" residue directly above a fence', () => {

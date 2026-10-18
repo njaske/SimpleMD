@@ -259,6 +259,20 @@ describe('matchesShortcut: symbol keys', () => {
     assert.ok(matchesShortcut(key('-', 'Slash', ctrl), 'Mod+-', 'win32'))
   })
 
+  it('matches Mod+Shift+<digit> by code even when Shift+digit types a bound symbol', () => {
+    // Arrange: German, Swiss and Nordic layouts type "/" with Shift+7 and "=" with Shift+0
+    const shift7 = key('/', 'Digit7', { ctrlKey: true, shiftKey: true })
+    const shift0 = key('=', 'Digit0', { metaKey: true, shiftKey: true })
+
+    // Act / Assert: the numbered-list shortcut works; Mod+/ also answers, and the
+    // caller's priority (editor shortcuts first) settles the overlap
+    assert.ok(matchesShortcut(shift7, 'Mod+Shift+7', 'win32'))
+    assert.ok(matchesShortcut(shift7, 'Mod+/', 'win32'))
+    assert.ok(matchesShortcut(shift0, 'Mod+Shift+0', 'darwin'))
+    assert.ok(!matchesShortcut(shift7, 'Mod+Shift+8', 'win32'))
+    assert.ok(!matchesShortcut(key('/', 'Digit7', ctrl), 'Mod+Shift+7', 'win32'))
+  })
+
   it('matches Shift variants of symbol and digit shortcuts by code', () => {
     // US: Shift+. types ">", Shift+8 "*", Shift+7 "&", Shift+9 "(".
     assert.ok(matchesShortcut(key('>', 'Period', { ctrlKey: true, shiftKey: true }), 'Mod+Shift+.', 'win32'))

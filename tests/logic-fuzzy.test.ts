@@ -223,6 +223,38 @@ describe('fuzzyMatch with Unicode', () => {
     assert.ok(fuzzyMatch('CAFÉ', 'cafe'))
   })
 
+  it('matches a decomposed (NFD) accent in the query against precomposed names', () => {
+    // Arrange
+    const decomposedE = `e${String.fromCharCode(0x301)}`
+
+    // Act
+    const m = fuzzyMatch(decomposedE, 'Café.md')
+    const whole = fuzzyMatch(`caf${decomposedE}`, 'Café.md')
+
+    // Assert
+    assert.deepEqual(m?.positions, [3])
+    assert.deepEqual(whole?.positions, [0, 1, 2, 3])
+  })
+
+  it('treats a decomposed accent in a name as part of its letter', () => {
+    // Arrange: macOS-style NFD name next to the same name precomposed
+    const nfd = `Cafe${String.fromCharCode(0x301)}.md`
+    const nfc = 'Café.md'
+
+    // Act
+    const m = fuzzyMatch('cafe.md', nfd)
+
+    // Assert: the run isn't broken, so both spellings score the same
+    assert.deepEqual(m?.positions, [0, 1, 2, 3, 5, 6, 7])
+    assert.equal(m?.score, score('cafe.md', nfc))
+    assert.ok(fuzzyMatch('é', nfd))
+  })
+
+  it('ignores an accent mark in the query that composes with nothing', () => {
+    // "x" + U+0301 has no precomposed form, so NFC leaves the mark on its own
+    assert.deepEqual(fuzzyMatch(`x${String.fromCharCode(0x301)}y`, 'xy.md')?.positions, [0, 1])
+  })
+
   it('reports UTF-16 positions after astral characters', () => {
     // Arrange
     const text = '😀 ab.md'

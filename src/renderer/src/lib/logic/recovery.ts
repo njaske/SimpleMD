@@ -1,7 +1,7 @@
 // Which unsaved buffers to keep for crash recovery, and validating what comes back.
 import type { RecoveryEntry } from '@shared/types'
 
-/** Total characters of recovery text kept on disk; older/larger buffers are dropped first. */
+/** Total characters of recovery text kept on disk; the largest buffers are dropped first. */
 export const MAX_RECOVERY_CHARS = 20 * 1024 * 1024
 
 export interface BufferState {
@@ -20,8 +20,9 @@ function isUnsaved(b: BufferState): boolean {
   return b.path !== null || b.content.trim() !== ''
 }
 
-/** Indexes of the buffers to drop so the rest fit in `budget` characters, largest first
- *  (later buffers go first among equals: the earlier tabs are usually the older work). */
+/** Indexes of the buffers to drop so the rest fit in `budget` characters, largest first.
+ *  Among equal sizes the later tabs go first, keeping the earlier tabs, which usually hold
+ *  the longer-running work. */
 function overBudget(sizes: readonly number[], budget: number): Set<number> {
   let total = sizes.reduce((n, s) => n + s, 0)
   const largestFirst = sizes.map((size, index) => ({ size, index }))

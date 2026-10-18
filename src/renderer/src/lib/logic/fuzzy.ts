@@ -47,6 +47,12 @@ const LETTER = 6
 const COMBINING_MARKS = /[\u0300-\u036f]/g
 const WHITESPACE = /\s/
 
+/** Combining diacritical marks (U+0300\u2013U+036F): the accents NFD splits off Latin,
+ *  Greek and Cyrillic letters, which matching ignores just as it folds "\u00e9" to "e". */
+function isCombiningMark(code: number): boolean {
+  return code >= 0x300 && code <= 0x36f
+}
+
 /** The text as folded code points plus what scoring needs, in scratch buffers indexed by
  *  character (code point), not UTF-16 unit; `offsets` maps back for highlighting. Valid
  *  until the next text is prepared. */
@@ -200,18 +206,24 @@ function prepare(text: string): Prepared {
   let extStart = -1
   let prevClass = WHITE
   for (let i = 0; i < text.length; length++) {
+    if (i === baseOffset) baseStart = length
+    if (i === extOffset) extStart = length
     let code = text.charCodeAt(i)
     let cls: number
     if (code < 128) {
       cls = ASCII_CLASS[code]
       folded[length] = code >= 65 && code <= 90 ? code + 32 : code
+    } else if (isCombiningMark(code)) {
+      // A decomposed accent ("e" + U+0301, as in macOS names) belongs to the letter
+      // before it: skipped, so it neither needs matching nor breaks a run.
+      i++
+      length--
+      continue
     } else {
       code = codeAt(text, i)
       cls = classOfCode(code)
       folded[length] = foldCode(code)
     }
-    if (i === baseOffset) baseStart = length
-    if (i === extOffset) extStart = length
     offsets[length] = i
     bonus[length] = BONUS_TABLE[prevClass * CLASS_COUNT + cls] + (i >= baseOffset ? BONUS_BASENAME : 0)
     prevClass = cls
@@ -221,11 +233,13 @@ function prepare(text: string): Prepared {
 }
 
 /** Query characters to look for, folded, with whitespace dropped so "new file" finds
- *  "New file in folder". */
+ *  "New file in folder". The query is composed first (NFC), so a decomposed "e" + U+0301
+ *  folds like "é" does; accent marks that don't compose are dropped, as in texts. */
 function prepareQuery(query: string): number[] {
   const out: number[] = []
-  for (const ch of query) {
-    if (!WHITESPACE.test(ch)) out.push(foldCode(ch.codePointAt(0) ?? 0))
+  for (const ch of query.normalize('NFC')) {
+    const code = ch.codePointAt(0) ?? 0
+    if (!WHITESPACE.test(ch) && !isCombiningMark(code)) out.push(foldCode(code))
   }
   return out
 }
