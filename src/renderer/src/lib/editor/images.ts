@@ -103,17 +103,21 @@ interface Pending {
   readonly id: number
   readonly from: number
   readonly to: number
+  /** The text the image replaces (a pasted-over selection), to check it's still there. */
+  readonly replaces: string
 }
 
 const addPending = StateEffect.define<Pending>()
 const removePending = StateEffect.define<number>()
 
-// Where each in-flight image will land, kept in step with edits made while it saves.
+// Where each in-flight image will land, kept in step with edits made while it saves. Both
+// ends map to the left, so text typed at the spot (or just after a selection) stays
+// outside it: the image lands before what the user typed instead of replacing it.
 const pendingField = StateField.define<readonly Pending[]>({
   create: () => [],
   update(value, tr) {
     const mapped = tr.docChanged
-      ? value.map((p) => ({ id: p.id, from: tr.changes.mapPos(p.from, -1), to: tr.changes.mapPos(p.to, 1) }))
+      ? value.map((p) => ({ ...p, from: tr.changes.mapPos(p.from, -1), to: tr.changes.mapPos(p.to, -1) }))
       : value
     return tr.effects.reduce<readonly Pending[]>((list, e) => {
       if (e.is(addPending)) return [...list, e.value]
@@ -138,10 +142,13 @@ function finishInsert(view: EditorView, id: number, saved: readonly Saved[], use
     return
   }
   const images = done.map((s) => markdownImage(imageAlt(s.name), s.path)).join('\n')
-  const place = placeImages(view.state.doc, spot.from, spot.to, images)
+  // A selection edited while saving is the user's text now: insert before it, don't replace.
+  const intact = view.state.sliceDoc(spot.from, spot.to) === spot.replaces
+  const to = intact ? spot.to : spot.from
+  const place = placeImages(view.state.doc, spot.from, to, images)
   const { main } = view.state.selection
   // Follow the image with the cursor only if the user is still waiting where it lands.
-  const cursorHere = main.empty && main.head >= spot.from && main.head <= spot.to
+  const cursorHere = main.from >= spot.from && main.to <= to
   view.dispatch({
     changes: { from: place.from, to: place.to, insert: place.insert },
     effects: removePending.of(id),
@@ -157,7 +164,7 @@ export function insertImages(view: EditorView, files: readonly File[], at: { fro
   const save = hooks.save()
   if (!save || !files.length) return false
   const id = nextId++
-  view.dispatch({ effects: addPending.of({ id, from: at.from, to: at.to }) })
+  view.dispatch({ effects: addPending.of({ id, from: at.from, to: at.to, replaces: view.state.sliceDoc(at.from, at.to) }) })
   Promise.all(files.map(async (file) => ({ name: file.name, path: await save(file) })))
     .then((saved) => {
       if (!view.dom.isConnected) return

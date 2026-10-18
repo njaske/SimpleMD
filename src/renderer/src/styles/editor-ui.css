@@ -194,8 +194,8 @@
   justify-content: start;
   align-items: center;
   gap: 6px;
-  /* Starts where the centred text column (880px, as in theme.ts) starts. */
-  padding: 8px max(12px, calc((100% - 880px) / 2 + 12px));
+  /* Starts at the left edge of the centred column (gutter included), as the editor does. */
+  padding: 8px max(12px, calc((100% - var(--smd-editor-measure, 880px)) / 2));
   font: 400 12.5px/1.3 var(--ui-font, 'Inter Variable', system-ui, sans-serif);
   color: var(--fg, #1f1e1c);
 }
@@ -212,10 +212,13 @@
   background: var(--bg-sunken, color-mix(in oklch, var(--fg, #1f1e1c) 4%, var(--bg, #fefdfb)));
   transition: border-color var(--dur-fast, 120ms) var(--ease-out, ease), box-shadow var(--dur-fast, 120ms) var(--ease-out, ease);
 }
-.smd-search__field:focus-within {
+/* Only the text box lights the field up; a focused chip inside has its own ring. */
+.smd-search__field:has(.smd-search__input:focus) {
   border-color: var(--accent, #c0392b);
   box-shadow: 0 0 0 3px var(--accent-soft, rgba(192, 57, 43, .12));
 }
+.smd-search__field.is-invalid,
+.smd-search__field.is-invalid:has(.smd-search__input:focus) { border-color: var(--caution, #c0392b); }
 
 .smd-search__input {
   flex: 1 1 auto;
@@ -228,7 +231,7 @@
   font: inherit;
   outline: none;
 }
-/* The whole field shows focus (:focus-within above), not the bare input inside it. */
+/* The whole field shows focus (above), not the bare input inside it. */
 .smd-search .smd-search__input:focus,
 .smd-search .smd-search__input:focus-visible { outline: none; box-shadow: none; }
 .smd-search__input::placeholder { color: var(--fg-faint, #76716a); }
@@ -241,8 +244,10 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.smd-search__count:empty { display: none; }
+.smd-search__count.is-empty,
+.smd-search__count-short { display: none; }
 .smd-search__count.is-none { color: var(--fg-muted, #5c5852); }
+.smd-search__field.is-invalid .smd-search__count { color: var(--caution, #c0392b); }
 
 .smd-search__toggles { display: flex; flex: none; gap: 1px; }
 .smd-search__toggle {
@@ -305,6 +310,7 @@
 .smd-search__btn:hover { background: var(--bg-hover, color-mix(in oklch, var(--fg, #1f1e1c) 6%, transparent)); }
 .smd-search__btn:active { background: var(--bg-active, color-mix(in oklch, var(--fg, #1f1e1c) 10%, transparent)); }
 .smd-search__short { display: none; }
+.smd-search__short svg { display: block; }
 
 .smd-search__toggle:focus-visible,
 .smd-search__icon:focus-visible,
@@ -313,13 +319,38 @@
   outline-offset: 1px;
 }
 
-/* A narrow Split pane: tighter padding and "All" for "Replace all", so the find field
-   keeps room to type. */
+/* A narrow Split pane: tighter padding, and Replace / Replace all become icon buttons
+   (named and tooltipped as before), so the find field keeps room to type. */
 @container smd-panels (max-width: 460px) {
   .smd-search { padding: 7px 8px; gap: 5px; }
-  .smd-search__btn { padding: 0 8px; }
+  .smd-search__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    padding: 0;
+    border-color: transparent;
+    background: transparent;
+    color: var(--fg-muted, #5c5852);
+  }
+  .smd-search__btn:hover { color: var(--fg, #1f1e1c); }
+  .smd-search__actions--replace { gap: 2px; }
   .smd-search__long { display: none; }
   .smd-search__short { display: inline; }
+}
+
+/* Narrower still: the toggles and a short count ("3/21") move under the text inside the
+   find field, so the query itself stays readable. Select all keeps its Alt+Enter key. */
+@container smd-panels (max-width: 340px) {
+  .smd-search { align-items: start; }
+  .smd-search__field { flex-wrap: wrap; height: auto; padding: 0 3px 3px 0; }
+  .smd-search__field:not(:has(.smd-search__toggles)) { padding-bottom: 0; }
+  .smd-search__input { flex: 1 0 100%; height: 26px; }
+  .smd-search__toggles { order: 1; padding-left: 4px; }
+  .smd-search__count { order: 2; margin-left: auto; padding: 0 4px; line-height: 20px; }
+  .smd-search__count-long { display: none; }
+  .smd-search__count-short { display: inline; }
+  .smd-search__icon--select { display: none; }
 }
 
 .smd-reduce-motion .smd-search__field,

@@ -1,11 +1,14 @@
 // YAML front matter (`---` … `---` at the very top) for the editor's Markdown parser.
-// Without it the closing `---` turns the lines above into a bold setext heading. The
-// rules match the reader's (lib/markdown/frontMatter.ts): the block must close and its
-// lines must look like YAML, otherwise the first `---` is an ordinary thematic break.
-import { foldNodeProp } from '@codemirror/language'
-import type { SyntaxNode } from '@lezer/common'
+// Without it the closing `---` turns the lines above into a bold setext heading. Whether
+// the top is front matter is decided once per parse from the raw text, with the reader's
+// own rules (lib/markdown/frontMatter.ts), so the editor and the reader always agree.
+// When it isn't, nothing is consumed and the lines parse as ordinary Markdown.
+import { foldNodeProp, Language, LanguageSupport } from '@codemirror/language'
+import { markdown } from '@codemirror/lang-markdown'
+import { Parser, type Input, type PartialParse, type SyntaxNode, type Tree, type TreeFragment } from '@lezer/common'
 import { Tag, tags as t } from '@lezer/highlight'
-import type { BlockContext, Element, Line, MarkdownConfig } from '@lezer/markdown'
+import type { BlockContext, Line, MarkdownConfig } from '@lezer/markdown'
+import { extractFrontMatter } from '@/lib/markdown/frontMatter'
 
 /** The block's text (muted) and its top-level keys, for editorHighlight. */
 export const frontmatterTags = { content: Tag.define(), key: Tag.define(t.propertyName) }
@@ -13,72 +16,56 @@ export const frontmatterTags = { content: Tag.define(), key: Tag.define(t.proper
 const OPEN = /^---[ \t]*$/
 const CLOSE = /^(?:---|\.\.\.)[ \t]*$/
 const KEY = /^([^\s#:-][^:]*?|-[^\s:][^:]*?)[ \t]*:(?:[ \t]|$)/
-const LIST_ITEM = /^[ \t]*-(?:[ \t]|$)/
+/** The reader looks this far for the closing fence; so do we. */
+/** A first line cut off mid-read that could still turn out to be the opening fence. */
+const MAY_OPEN = /^(?:-{0,3}|---[ \t]*)$/
 const MAX_LINES = 400
+const MAX_CHARS = 64 * 1024
+const CHUNK = 4096
 
-const skippable = (text: string): boolean => !text.trim() || /^[ \t]*#/.test(text)
-const yamlLine = (text: string): boolean => skippable(text) || KEY.test(text) || /^[ \t]+\S/.test(text) || LIST_ITEM.test(text)
-
-/** Elements for one consumed line inside the block: its key, if it has one. */
-function keyOf(cx: BlockContext, start: number, text: string): Element[] {
-  const key = KEY.exec(text)
-  return key ? [cx.elt('FrontmatterKey', start, start + key[1].length)] : []
-}
-
-interface ConsumedLine {
-  readonly start: number
-  readonly text: string
-}
-
-/** Runs of adjacent non-blank lines: each one is a paragraph. */
-function paragraphs(lines: readonly ConsumedLine[]): ConsumedLine[][] {
-  return lines.reduce<ConsumedLine[][]>((runs, l) => {
-    if (!l.text.trim()) return [...runs, []]
-    const last = runs[runs.length - 1] ?? []
-    return [...runs.slice(0, -1), [...last, l]]
-  }, [[]]).filter((run) => run.length > 0)
-}
-
-/** Not front matter after all: the `---` is a thematic break, the lines after it paragraphs. */
-function fallBack(cx: BlockContext, open: number, lines: readonly ConsumedLine[]): void {
-  cx.addElement(cx.elt('HorizontalRule', 0, open))
-  for (const run of paragraphs(lines)) {
-    const from = run[0].start
-    const content = run.map((l) => l.text).join('\n')
-    cx.addElement(cx.elt('Paragraph', from, from + content.length, cx.parser.parseInline(content, from)))
+/** The first lines of `input` the reader would look at for front matter. Stops at the
+ *  first line when it can't open a block, so most documents cost one small read. */
+export function leadingLines(input: Input): string[] {
+  let text = ''
+  let whole: string[] = []
+  for (let pos = 0; pos < input.length && text.length < MAX_CHARS; ) {
+    const chunk = input.read(pos, Math.min(input.length, pos + CHUNK))
+    pos += chunk.length
+    text += chunk
+    // Only complete lines count: a cut-off "---x" must not read as a fence.
+    const lines = text.split('\n')
+    whole = pos >= input.length ? lines : lines.slice(0, -1)
+    if (whole.length ? !OPEN.test(whole[0]) : !MAY_OPEN.test(lines[0])) return []
+    if (whole.length > MAX_LINES || whole.slice(1).some((l) => CLOSE.test(l))) break
   }
+  return whole
 }
+
+/** Lines [0, n) of the document are front matter; null when there is none. */
+export function frontmatterLines(input: Input): number | null {
+  const lines = leadingLines(input)
+  return lines.length ? (extractFrontMatter(lines)?.endLine ?? null) : null
+}
+
+// The current parse's answer, set around each step of it (see FrontmatterParse). A plain
+// variable is enough: parsing is synchronous, and nested parses restore what they found.
+let activeLines: number | null = null
 
 function parseFrontmatter(cx: BlockContext, line: Line): boolean {
-  if (cx.lineStart !== 0 || cx.parentType().name !== 'Document' || !OPEN.test(line.text)) return false
-  const open = line.text.length
-  const children: Element[] = [cx.elt('FrontmatterMark', 0, open)]
-  const lines: ConsumedLine[] = []
-  let sawKey = false
-  // Only the next line can be peeked, so walk forward while it still looks like YAML.
-  while (lines.length < MAX_LINES) {
-    const next = cx.peekLine()
-    if (CLOSE.test(next) && cx.nextLine()) {
-      const end = cx.lineStart + line.text.length
-      children.push(cx.elt('FrontmatterMark', cx.lineStart, end))
-      cx.nextLine()
-      cx.addElement(cx.elt('Frontmatter', 0, end, children))
-      return true
+  const total = activeLines
+  if (total === null || cx.lineStart !== 0 || cx.parentType().name !== 'Document') return false
+  const children = [cx.elt('FrontmatterMark', 0, line.text.length)]
+  for (let i = 1; i < total && cx.nextLine(); i++) {
+    if (i === total - 1) {
+      children.push(cx.elt('FrontmatterMark', cx.lineStart, cx.lineStart + line.text.length))
+      break
     }
-    // The first real line must be a key, as in the reader; two rules aren't front matter.
-    const fits = yamlLine(next) && (sawKey || skippable(next) || KEY.test(next))
-    if (!fits) break
-    if (!cx.nextLine()) {
-      fallBack(cx, open, lines)
-      return true
-    }
-    sawKey = sawKey || KEY.test(line.text)
-    lines.push({ start: cx.lineStart, text: line.text })
-    children.push(...keyOf(cx, cx.lineStart, line.text))
+    const key = KEY.exec(line.text)
+    if (key) children.push(cx.elt('FrontmatterKey', cx.lineStart, cx.lineStart + key[1].length))
   }
-  // A block parser must move past what it read: the `---` and any lines after it.
+  const end = cx.lineStart + line.text.length
   cx.nextLine()
-  fallBack(cx, open, lines)
+  cx.addElement(cx.elt('Frontmatter', 0, end, children))
   return true
 }
 
@@ -89,7 +76,7 @@ function foldFrontmatter(node: SyntaxNode): { from: number; to: number } | null 
   return open && close && close.from - 1 > open.to ? { from: open.to, to: close.from - 1 } : null
 }
 
-export const frontmatter: MarkdownConfig = {
+export const frontmatterSyntax: MarkdownConfig = {
   defineNodes: [
     { name: 'Frontmatter', block: true, style: frontmatterTags.content },
     { name: 'FrontmatterMark', style: t.processingInstruction },
@@ -97,4 +84,69 @@ export const frontmatter: MarkdownConfig = {
   ],
   parseBlock: [{ name: 'Frontmatter', parse: parseFrontmatter, before: 'HorizontalRule' }],
   props: [foldNodeProp.add({ Frontmatter: foldFrontmatter })]
+}
+
+const hasFrontmatter = (tree: Tree): boolean => tree.topNode.firstChild?.name === 'Frontmatter'
+
+/** Runs the inner parse with its front-matter answer in place. */
+class FrontmatterParse implements PartialParse {
+  private readonly inner: PartialParse
+  private readonly lines: number | null
+
+  constructor(inner: PartialParse, lines: number | null) {
+    this.inner = inner
+    this.lines = lines
+  }
+
+  advance(): Tree | null {
+    const outer = activeLines
+    activeLines = this.lines
+    try {
+      return this.inner.advance()
+    } finally {
+      activeLines = outer
+    }
+  }
+
+  get parsedPos(): number {
+    return this.inner.parsedPos
+  }
+
+  get stoppedAt(): number | null {
+    return this.inner.stoppedAt
+  }
+
+  stopAt(pos: number): void {
+    this.inner.stopAt(pos)
+  }
+}
+
+/** The Markdown parser plus the front-matter decision. When that decision flips (the
+ *  closing `---` was just typed, or removed), the old tree's nodes near the top were read
+ *  under the other answer, so the parse starts afresh instead of reusing them. */
+class FrontmatterParser extends Parser {
+  private readonly inner: Parser
+
+  constructor(inner: Parser) {
+    super()
+    this.inner = inner
+  }
+
+  createParse(input: Input, fragments: readonly TreeFragment[], ranges: readonly { from: number; to: number }[]): PartialParse {
+    const lines = ranges[0]?.from === 0 ? frontmatterLines(input) : null
+    const isFront = lines !== null
+    const reuse = fragments.every((f) => hasFrontmatter(f.tree) === isFront) ? fragments : []
+    return new FrontmatterParse(this.inner.createParse(input, reuse, ranges), lines)
+  }
+}
+
+type MarkdownOptions = NonNullable<Parameters<typeof markdown>[0]>
+
+/** lang-markdown's support with front matter added (same language data, keymap and
+ *  commands; only the parser is wrapped). */
+export function markdownWithFrontmatter(options: MarkdownOptions): LanguageSupport {
+  const extensions = options.extensions ? [options.extensions, frontmatterSyntax] : [frontmatterSyntax]
+  const base = markdown({ ...options, extensions })
+  const language = new Language(base.language.data, new FrontmatterParser(base.language.parser), [], 'markdown')
+  return new LanguageSupport(language, base.support)
 }

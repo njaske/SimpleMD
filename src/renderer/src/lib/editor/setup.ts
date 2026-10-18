@@ -20,13 +20,13 @@ import { defaultKeymap, history, historyKeymap, selectParentSyntax, toggleBlockC
 import { bracketMatching, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting } from '@codemirror/language'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
-import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
+import { markdownLanguage } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
 import { editorKeymap } from './commands'
 import { smartPaste } from './paste'
 import { imageHandling, type ImageHooks } from './images'
 import { editorHighlight, editorTheme } from './theme'
-import { frontmatter } from './frontmatter'
+import { markdownWithFrontmatter } from './frontmatter'
 import { createSearchPanel } from './searchPanel'
 import { strokeIcon } from './domIcons'
 
@@ -36,8 +36,8 @@ import { strokeIcon } from './domIcons'
 const RESERVED_COMMANDS: ReadonlySet<Command> = new Set([toggleComment, selectParentSyntax, toggleBlockComment])
 export const appDefaultKeymap: readonly KeyBinding[] = defaultKeymap.filter((b) => !b.run || !RESERVED_COMMANDS.has(b.run))
 
-// The go-to-line prompt's words, in sentence case (the search panel has its own).
-const PHRASES = { 'Go to line': 'Go to line', go: 'Go' }
+// The go-to-line prompt's words, in sentence case and named like the find panel's.
+const PHRASES = { 'Go to line': 'Go to line', go: 'Go', close: 'Close (Esc)' }
 
 /** A small chevron for the fold gutter, drawn like the app's stroke icons. */
 function foldMarker(open: boolean): HTMLElement {
@@ -81,7 +81,7 @@ export function editorExtensions(setup: EditorSetup): Extension[] {
     editorKeymap(),
     keymap.of([...closeBracketsKeymap, ...appDefaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap]),
     // Our paste handling replaces lang-markdown's URL-over-selection paste.
-    markdown({ base: markdownLanguage, codeLanguages: languages, extensions: frontmatter, pasteURLAsLink: false }),
+    markdownWithFrontmatter({ base: markdownLanguage, codeLanguages: languages, pasteURLAsLink: false }),
     imageHandling(setup.images),
     smartPaste(),
     editorTheme,

@@ -175,6 +175,47 @@ describe('insertImages', () => {
     view.destroy()
   })
 
+  it('keeps text typed at the landing spot while saving, with the image before it', async () => {
+    // Arrange
+    const saving = deferred<string | null>()
+    const hooks = { save: () => () => saving.promise, notice: () => undefined }
+    const view = editor('ab', 1, hooks)
+    images.insertImages(view, [png()], { from: 1, to: 1 }, hooks, 'input.paste')
+    // Act: the user keeps typing right where the image will go.
+    view.dispatch({ changes: { from: 1, insert: 'XYZ' }, selection: { anchor: 4 } })
+    saving.resolve('assets/image.png')
+    await tick()
+    // Assert
+    assert.equal(view.state.doc.toString(), 'a![image](assets/image.png)XYZb')
+    assert.equal(view.state.selection.main.head, view.state.doc.length - 1, 'the cursor stays after the typed text')
+    view.destroy()
+  })
+
+  it('replaces a pasted-over selection once saved', async () => {
+    const saving = deferred<string | null>()
+    const hooks = { save: () => () => saving.promise, notice: () => undefined }
+    const view = editor('see old here', 4, hooks)
+    view.dispatch({ selection: { anchor: 4, head: 7 } })
+    images.insertImages(view, [png()], { from: 4, to: 7 }, hooks, 'input.paste')
+    saving.resolve('assets/image.png')
+    await tick()
+    assert.equal(view.state.doc.toString(), 'see ![image](assets/image.png) here')
+    assert.equal(view.state.selection.main.head, 'see ![image](assets/image.png)'.length)
+    view.destroy()
+  })
+
+  it('inserts before a selection the user typed over while saving instead of replacing it', async () => {
+    const saving = deferred<string | null>()
+    const hooks = { save: () => () => saving.promise, notice: () => undefined }
+    const view = editor('see old here', 4, hooks)
+    images.insertImages(view, [png()], { from: 4, to: 7 }, hooks, 'input.paste')
+    view.dispatch({ changes: { from: 4, to: 7, insert: 'new' }, selection: { anchor: 7 } })
+    saving.resolve('assets/image.png')
+    await tick()
+    assert.equal(view.state.doc.toString(), 'see ![image](assets/image.png)new here')
+    view.destroy()
+  })
+
   it('tells an unsaved document to save first and inserts nothing', async () => {
     const notices: string[] = []
     const hooks = { save: () => async () => null, notice: (m: string) => notices.push(m) }

@@ -4,6 +4,7 @@ import { EditorView } from '@codemirror/view'
 import { HighlightStyle } from '@codemirror/language'
 import { tags as t } from '@lezer/highlight'
 import { frontmatterTags } from './frontmatter'
+import { iconMaskUrl } from './domIcons'
 
 const v = (name: string, fallback: string): string => `var(--${name}, ${fallback})`
 
@@ -74,17 +75,30 @@ const panels = {
   '.cm-button:hover': { backgroundColor: c.hover },
   '.cm-button:active': { backgroundImage: 'none', backgroundColor: c.active },
   '.cm-button:focus-visible, .cm-dialog-close:focus-visible': { outline: `2px solid ${c.focus}`, outlineOffset: '1px' },
+  // CodeMirror draws a text "×"; hide it and show the app's stroke icon, as the find panel does.
   '.cm-dialog-close': {
     top: '8px',
     right: '10px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     width: '26px',
     height: '26px',
+    padding: 0,
     borderRadius: c.radiusS,
     background: 'transparent',
     color: c.muted,
-    fontSize: '17px',
-    lineHeight: '26px',
+    fontSize: 0,
     cursor: 'pointer'
+  },
+  '.cm-dialog-close::before': {
+    content: '""',
+    width: '16px',
+    height: '16px',
+    backgroundColor: 'currentColor',
+    maskImage: iconMaskUrl('close'),
+    maskRepeat: 'no-repeat',
+    maskSize: '16px 16px'
   },
   '.cm-dialog-close:hover': { backgroundColor: c.hover, color: c.fg },
   '.cm-searchMatch': { backgroundColor: c.mark, borderRadius: '2px' },
@@ -93,7 +107,8 @@ const panels = {
 }
 
 export const editorTheme = EditorView.theme({
-  '&': { height: '100%', color: c.fg, backgroundColor: c.bg, fontSize: 'var(--smd-editor-size, 14px)' },
+  // --smd-editor-measure lets the find panel (editor-ui.css) line up with the column.
+  '&': { height: '100%', color: c.fg, backgroundColor: c.bg, fontSize: 'var(--smd-editor-size, 14px)', '--smd-editor-measure': EDITOR_MEASURE },
   // The caret and active line show focus; the app's global focus ring would outline the page.
   '&.cm-focused, .cm-content:focus-visible': { outline: 'none' },
   '.cm-scroller': {
