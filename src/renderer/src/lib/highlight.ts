@@ -14,6 +14,8 @@ export function loadHighlighter(): Promise<void> {
     loading = import('highlight.js/lib/common')
       .then((m) => {
         hljs = m.default
+        // Our code blocks hold escaped text only; don't let hljs warn about markup.
+        hljs.configure({ ignoreUnescapedHTML: true })
       })
       .catch(() => {
         // chunk failed to load; render code blocks as plain text
@@ -29,8 +31,15 @@ export function isHighlighterSettled(): boolean {
   return settled
 }
 
+/** The highlight.js language named by a `language-x` class, if it knows it. */
+function knownLanguage(code: HTMLElement): string | null {
+  const m = /(?:^|\s)language-([\w+#.-]+)/.exec(code.className)
+  return m && hljs?.getLanguage(m[1]) ? m[1] : null
+}
+
 export function highlightCode(code: HTMLElement): void {
-  if (!hljs) return
+  // Unknown languages stay plain: hljs would log an error for each of them.
+  if (!hljs || !knownLanguage(code)) return
   try {
     hljs.highlightElement(code)
   } catch {

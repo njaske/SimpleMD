@@ -1,0 +1,93 @@
+/* Reader overlays: the find bar. Floats at the top-right of the reader pane (its
+   parent must be positioned). Tokens from tokens.css, with fallbacks. */
+
+.smd-findbar {
+  position: absolute;
+  top: 12px;
+  right: 18px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  max-width: calc(100% - 32px);
+  background: var(--bg-elev, #fff);
+  border: 1px solid var(--border-strong, #dcd8d0);
+  border-radius: var(--radius-m, 10px);
+  box-shadow: var(--shadow-2, 0 2px 6px rgb(40 32 20 / 0.06), 0 16px 40px -8px rgb(40 32 20 / 0.18));
+  font-family: var(--ui-font, system-ui, sans-serif);
+  font-size: var(--ui-size, 13px);
+  color: var(--fg, #1f1e1c);
+}
+
+.smd-findbar-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px 0 9px;
+  min-width: 0;
+  border-radius: var(--radius-s, 6px);
+  background: var(--bg-sunken, var(--bg-elev2, #f3f1ec));
+  box-shadow: inset 0 0 0 1px transparent;
+  transition: box-shadow var(--dur-fast, 120ms) var(--ease-out, ease);
+}
+.smd-findbar-field:focus-within { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #c0392b) 55%, transparent); }
+.smd-findbar-glass { flex: none; color: var(--fg-faint, #6e6962); }
+
+.smd-findbar-input {
+  width: 190px;
+  min-width: 60px;
+  flex: 1 1 auto;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--fg, #1f1e1c);
+  font: inherit;
+}
+.smd-findbar-input::placeholder { color: var(--fg-faint, #6e6962); }
+/* The field shows focus itself; no second ring on the bare input. */
+.smd-root .smd-findbar-input:focus-visible { outline: none; }
+
+.smd-findbar-count {
+  flex: none;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--fg-muted, #5c5852);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.smd-findbar-count:empty { display: none; }
+.smd-findbar-field.is-empty .smd-findbar-count { color: var(--caution, #be3329); }
+
+.smd-findbar-actions { display: flex; align-items: center; gap: 1px; padding-left: 2px; }
+.smd-findbar-sep { width: 1px; height: 16px; margin: 0 3px; background: var(--border, #ece9e3); }
+
+/* Self-contained icon buttons (the shared .smd-iconbtn styles refine these). */
+.smd-findbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s, 6px);
+  background: transparent;
+  color: var(--fg-muted, #5c5852);
+  cursor: pointer;
+  transition: background var(--dur-fast, 120ms) var(--ease-out, ease), color var(--dur-fast, 120ms) var(--ease-out, ease);
+}
+.smd-findbar-btn:hover:not(:disabled) { background: var(--bg-hover, rgb(58 52 40 / 0.07)); color: var(--fg, #1f1e1c); }
+.smd-findbar-btn:active:not(:disabled) { background: var(--bg-active, rgb(58 52 40 / 0.12)); }
+.smd-findbar-btn:disabled { opacity: .4; cursor: default; }
+
+@media (max-width: 760px) {
+  .smd-findbar { right: 10px; top: 8px; }
+  .smd-findbar-input { width: 120px; }
+}
+
+@media print {
+  .smd-findbar { display: none !important; }
+}
