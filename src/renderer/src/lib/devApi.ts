@@ -2,15 +2,7 @@
 // browser (no Electron preload) — e.g. opening the Vite dev server directly for
 // visual checks. Guarded behind import.meta.env.DEV at the call site, so this
 // module is tree-shaken out of production builds. Everything lives in memory.
-import type {
-  Api,
-  FolderScan,
-  MdFolderInfo,
-  OpenedFile,
-  Platform,
-  RecoveryEntry,
-  Settings
-} from '@shared/types'
+import type { Api, FolderScan, MdFolderInfo, OpenedFile, Platform, RecoveryEntry, Settings } from '@shared/types'
 import { DEV_SAMPLE_FILES } from './devSamples'
 
 const ROOT = '/sample-notes'
@@ -117,7 +109,25 @@ export function installDevApi(): void {
     settings.activeId = null
   }
 
-  let recovery: RecoveryEntry[] = []
+  // ?recovery previews the "Recovered unsaved documents" prompt.
+  let recovery: RecoveryEntry[] = new URLSearchParams(location.search).has('recovery')
+    ? [
+        {
+          id: welcome,
+          path: welcome,
+          title: 'Welcome.md',
+          content: `${contents[welcome] ?? ''}\n\nA line typed just before the crash.\n`,
+          savedAt: Date.now() - 6 * 60_000
+        },
+        {
+          id: 'untitled:1',
+          path: null,
+          title: 'Trip ideas',
+          content: '# Trip ideas\n\n- Lisbon in spring\n',
+          savedAt: Date.now() - 5 * 60_000
+        }
+      ]
+    : []
   let zoom = 1
 
   const addFile = (dir: string, name: string, content: string): OpenedFile => {
