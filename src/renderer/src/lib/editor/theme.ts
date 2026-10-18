@@ -26,7 +26,8 @@ const c = {
   sel: v('sel', 'rgba(192, 57, 43, 0.17)'),
   focus: v('focus', 'rgba(192, 57, 43, 0.55)'),
   mark: v('mark-soft', 'rgba(234, 179, 8, 0.3)'),
-  mono: v('mono', MONO),
+  // The bundled face leads so the editor never depends on what --mono happens to list.
+  mono: `'JetBrains Mono Variable', ${v('mono', MONO)}`,
   ui: v('ui-font', UI),
   radiusS: v('radius-s', '6px'),
   radiusM: v('radius-m', '10px'),

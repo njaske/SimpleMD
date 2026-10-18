@@ -9,6 +9,7 @@ import { ariaShortcut } from '@/lib/editor/shortcuts'
 import { FORMAT_GROUPS, HEADING_CHOICES, type FormatItem } from '@/lib/editor/formatItems'
 import { ChevronDownIcon, HeadingIcon, MoreIcon } from '@/lib/editor/formatIcons'
 import FormatMenu, { type FormatMenuItem } from '@/lib/editor/FormatMenu'
+import { controlCount, rovingIndex } from '@/lib/editor/formatLayout'
 import { onRovingKey, useClampedLeft, useTooltip, useVisibleGroups, type Tip } from '@/lib/editor/useFormatBarUi'
 import '@/styles/editor-ui.css'
 
@@ -97,13 +98,18 @@ export default function FormatBar({ onFormat, platform }: FormatBarProps) {
     setMenu((open) => (open?.kind === kind ? null : { kind, keyboard }))
   }
 
+  const shownGroups = FORMAT_GROUPS.slice(0, visible)
+  const hiddenGroups = FORMAT_GROUPS.slice(visible)
+  // Groups fold into "More" as the pane narrows; clamp so one control stays tabbable.
+  const activeIndex = rovingIndex(focusIndex, controlCount(GROUP_SIZES, visible))
+
   // Shared wiring for every focusable control: roving tabindex plus tooltip.
   let next = 0
   const control = (label: string, shortcut: string | null) => {
     const index = next++
     return {
       'data-roving': '',
-      tabIndex: index === focusIndex ? 0 : -1,
+      tabIndex: index === activeIndex ? 0 : -1,
       onFocus: (e: FocusEvent<HTMLElement>) => {
         setFocusIndex(index)
         if (e.currentTarget.matches(':focus-visible') && !menu) show(e.currentTarget, label, hint(shortcut))
@@ -152,9 +158,6 @@ export default function FormatBar({ onFormat, platform }: FormatBarProps) {
       {content}
     </button>
   )
-
-  const shownGroups = FORMAT_GROUPS.slice(0, visible)
-  const hiddenGroups = FORMAT_GROUPS.slice(visible)
 
   return (
     <div ref={bar} className="smd-formatbar" role="toolbar" aria-label="Formatting" aria-orientation="horizontal" onKeyDown={onRovingKey}>

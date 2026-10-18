@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { BAR_METRICS, barWidth, visibleGroupCount } from '../src/renderer/src/lib/editor/formatLayout.ts'
+import { BAR_METRICS, barWidth, controlCount, rovingIndex, visibleGroupCount } from '../src/renderer/src/lib/editor/formatLayout.ts'
 import { ariaShortcut, FORMAT_SHORTCUTS, shortcutFor, toCodeMirrorKey } from '../src/renderer/src/lib/editor/shortcuts.ts'
 import { imageAlt, isImageFile, markdownImage, UNSAVED_NOTICE } from '../src/renderer/src/lib/editor/images.ts'
 
@@ -22,6 +22,23 @@ describe('format bar layout', () => {
     const all = barWidth(groups, 4)
     const three = barWidth(groups, 3)
     assert.equal(all - three, BAR_METRICS.divider + 3 * BAR_METRICS.button + 2 * BAR_METRICS.gap - (BAR_METRICS.divider + BAR_METRICS.button))
+  })
+})
+
+describe('format bar roving focus', () => {
+  const groups = [4, 2, 4, 3]
+
+  it('counts the heading menu, the shown buttons and More', () => {
+    assert.equal(controlCount(groups, 4), 14)
+    assert.equal(controlCount(groups, 2), 8)
+    assert.equal(controlCount(groups, 0), 2)
+  })
+
+  it('keeps a control tabbable after the focused one folds into More', () => {
+    assert.equal(rovingIndex(13, controlCount(groups, 4)), 13)
+    assert.equal(rovingIndex(13, controlCount(groups, 2)), 7)
+    assert.equal(rovingIndex(13, controlCount(groups, 0)), 1)
+    assert.equal(rovingIndex(3, controlCount(groups, 2)), 3)
   })
 })
 

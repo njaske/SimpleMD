@@ -35,7 +35,7 @@ function handlePaste(event: ClipboardEvent, view: EditorView): boolean {
   const { main } = view.state.selection
   const emptyLine = main.empty && view.state.doc.lineAt(main.head).text.trim() === ''
   if (main.empty && (converted.block || (emptyLine && converted.markdown.includes('\n')))) {
-    dispatchEdit(view, insertBlockText(textState(view.state), converted.markdown), 'input.paste')
+    dispatchEdit(view, insertBlockText(textState(view.state), converted.markdown, converted.block), 'input.paste')
   } else {
     view.dispatch(view.state.replaceSelection(converted.markdown), { scrollIntoView: true, userEvent: 'input.paste' })
   }

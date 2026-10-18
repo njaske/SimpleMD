@@ -1,17 +1,20 @@
 import assert from 'node:assert/strict'
+import { registerHooks } from 'node:module'
 import { describe, it } from 'node:test'
-import {
-  applyEdit,
-  applyFormat,
-  indentList,
-  insertBlockText,
-  isUrl,
-  mapPos,
-  pasteUrlOverSelection,
-  type FormatEdit,
-  type TextState
-} from '../src/renderer/src/lib/editor/format.ts'
+import type { FormatEdit, TextState } from '../src/renderer/src/lib/editor/format.ts'
 import type { FormatCommand } from '../src/renderer/src/lib/editor/types.ts'
+
+// The transforms import each other without extensions (Vite style); node needs the ".ts",
+// so resolve those before loading the module under test.
+registerHooks({
+  resolve(specifier, context, next) {
+    const extensionless = /^\.\.?\//.test(specifier) && !/\.\w+$/.test(specifier)
+    return next(extensionless && context.parentURL?.endsWith('.ts') ? `${specifier}.ts` : specifier, context)
+  }
+})
+const { applyEdit, applyFormat, indentList, insertBlockText, isUrl, mapPos, pasteUrlOverSelection } = await import(
+  '../src/renderer/src/lib/editor/format.ts'
+)
 
 // Cases are written with the selection inline: "‹" marks where it starts and "›" where it
 // ends; a lone "¦" is a cursor.
@@ -351,5 +354,133 @@ describe('helpers', () => {
     assert.equal(mapPos(changes, 1, -1), 0)
     assert.equal(mapPos(changes, 1, 1), 2)
     assert.equal(mapPos(changes, 3, -1), 2)
+  })
+})
+
+describe('inline marks inside a marked phrase', () => {
+  it('takes bold off the whole phrase from the first, middle or last word', () => {
+    assert.equal(fmt('say **he¦llo big world** now', 'bold'), 'say he¦llo big world now')
+    assert.equal(fmt('say **hello b¦ig world** now', 'bold'), 'say hello b¦ig world now')
+    assert.equal(fmt('say **hello big wor¦ld** now', 'bold'), 'say hello big wor¦ld now')
+  })
+
+  it('takes italic, strikethrough and inline code off the whole phrase', () => {
+    assert.equal(fmt('a *bb c¦c* d', 'italic'), 'a bb c¦c d')
+    assert.equal(fmt('a ~~bb c¦c~~ d', 'strikethrough'), 'a bb c¦c d')
+    assert.equal(fmt('x `foo b¦ar` y', 'code'), 'x foo b¦ar y')
+    assert.equal(fmt('__hello wo¦rld__', 'bold'), 'hello wo¦rld')
+  })
+
+  it('removes the right mark when bold and italic are nested', () => {
+    assert.equal(fmt('**bold *it¦al* more**', 'bold'), 'bold *it¦al* more')
+    assert.equal(fmt('**bold *it¦al* more**', 'italic'), '**bold it¦al more**')
+    assert.equal(fmt('***both wo¦rds***', 'bold'), '*both wo¦rds*')
+  })
+
+  it('adds italic to a word inside a bold phrase instead of unwrapping it', () => {
+    assert.equal(fmt('**hello wo¦rld**', 'italic'), '**hello *wo¦rld***')
+  })
+
+  it('ignores markers inside inline code and neighbouring phrases', () => {
+    assert.equal(fmt('**a** b¦b **c**', 'bold'), '**a** **b¦b** **c**')
+    assert.equal(fmt('`**x**` w¦ord', 'bold'), '`**x**` **w¦ord**')
+  })
+
+  it('splits the phrase around a selection inside it', () => {
+    assert.equal(fmt('say **hello ‹world›** now', 'bold'), 'say **hello** ‹world› now')
+    assert.equal(fmt('say **‹hello› world** now', 'bold'), 'say ‹hello› **world** now')
+    assert.equal(fmt('**one ‹two› three**', 'bold'), '**one** ‹two› **three**')
+    assert.equal(fmt('`foo ‹bar›`', 'code'), '`foo` ‹bar›')
+    assert.equal(fmt('~~a ‹b› c~~', 'strikethrough'), '~~a~~ ‹b› ~~c~~')
+  })
+
+  it('takes the mark off when the cursor sits right against the markers', () => {
+    assert.equal(fmt('**hello**¦ world', 'bold'), 'hello¦ world')
+    assert.equal(fmt('¦**hello**', 'bold'), '¦hello')
+    assert.equal(fmt('*a*¦', 'italic'), 'a¦')
+  })
+
+  it('merges a selection with a phrase it overlaps instead of nesting markers', () => {
+    assert.equal(fmt('**hel‹lo** wo›rld', 'bold'), '**hel‹lo wo›**rld')
+    assert.equal(fmt('‹see **bold** text›', 'bold'), '**‹see bold text›**')
+    assert.equal(fmt('a ‹b **c›** d', 'bold'), 'a **‹b c›** d')
+    assert.equal(fmt('***hel‹lo*** wo›rld', 'bold'), '***hel‹lo* wo›**rld')
+  })
+
+  it('does not pair escaped markers', () => {
+    assert.equal(fmt('\\*not ita¦lic*', 'italic'), '\\*not *ita¦lic**')
+  })
+
+  it('keeps italic on the rest of a *** phrase when bold comes off part of it', () => {
+    assert.equal(fmt('***hello ‹world›***', 'bold'), '***hello** ‹world›*')
+  })
+
+  it('treats snake_case as one word', () => {
+    assert.equal(fmt('use snake_c¦ase here', 'italic'), 'use *snake_c¦ase* here')
+    assert.equal(fmt('use *snake_c¦ase* here', 'italic'), 'use snake_c¦ase here')
+    assert.equal(fmt('my_v¦ar', 'bold'), '**my_v¦ar**')
+  })
+})
+
+describe('block commands and fenced code', () => {
+  it('leaves lines inside a fence alone for headings and lists', () => {
+    assert.equal(applyFormat('heading1', parse('```\nco¦de\n```')), null)
+    assert.equal(applyFormat('bulletList', parse('```\nfo¦o\n```')), null)
+    assert.equal(applyFormat('numberedList', parse('~~~\n¦\n~~~')), null)
+  })
+
+  it('formats the prose around a fence but not the code in it', () => {
+    assert.equal(fmt('‹para\n```\ncode\n```›', 'heading2'), '## ‹para\n```\ncode\n```›')
+    assert.equal(fmt('‹one\n```\ntwo\n```›', 'bulletList'), '- ‹one\n```\ntwo\n```›')
+  })
+
+  it('quotes a fence only when the whole block is selected', () => {
+    assert.equal(applyFormat('quote', parse('```\nco¦de\n```')), null)
+    assert.equal(fmt('‹para\n```\ncode\n```›', 'quote'), '> ‹para\n> ```\n> code\n> ```›')
+  })
+
+  it('does not treat list-like lines in a fence as items for Tab', () => {
+    assert.equal(indentList(parse('```\n- a\n- ¦b\n```'), 1), null)
+  })
+
+  it('carries a nested fence along with its item', () => {
+    const state = parse('- a\n- ‹b\n  ```\n  - x\n  ```›')
+    const edit = indentList(state, 1)
+    assert.ok(edit)
+    assert.equal(applyEdit(state.text, edit), '- a\n  - b\n    ```\n    - x\n    ```')
+  })
+
+  it('does not renumber numbered lines inside a fence', () => {
+    assert.equal(
+      fmt('¦a\n1. b\n   ```\n   7. code\n   7. more\n   ```\n2. c', 'numberedList'),
+      '1. ¦a\n2. b\n   ```\n   7. code\n   7. more\n   ```\n3. c'
+    )
+  })
+})
+
+describe('pasted tables', () => {
+  it('puts the cursor in a fresh paragraph below a pasted table', () => {
+    const state = parse('text¦')
+    assert.equal(show(state.text, insertBlockText(state, '| a |\n| - |', true)), 'text\n\n| a |\n| - |\n\n¦')
+  })
+
+  it('keeps a blank line between the fresh paragraph and the next block', () => {
+    const state = parse('¦\nnext')
+    assert.equal(show(state.text, insertBlockText(state, '| a |\n| - |', true)), '| a |\n| - |\n\n¦\n\nnext')
+  })
+})
+
+describe('links around the cursor', () => {
+  it('turns a link back into its text from anywhere inside it', () => {
+    assert.equal(fmt('see [do¦cs](http://a) ok', 'link'), 'see ‹docs› ok')
+    assert.equal(fmt('see [docs](http://¦a) ok', 'link'), 'see ‹docs› ok')
+  })
+
+  it('links a whole image instead of nesting inside it', () => {
+    assert.equal(fmt('![al¦t](x.png)', 'link'), '[![alt](x.png)](‹url›)')
+  })
+
+  it('does not unlink when the cursor only touches the link', () => {
+    assert.equal(fmt('[a](u) wo¦rd', 'link'), '[a](u) [word](‹url›)')
   })
 })

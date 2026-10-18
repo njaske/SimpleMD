@@ -32,3 +32,15 @@ export function visibleGroupCount(available: number, groupSizes: readonly number
   }
   return 0
 }
+
+/** Focusable controls in the bar: the heading menu, the shown buttons, and "More". */
+export function controlCount(groupSizes: readonly number[], visible: number): number {
+  const shown = groupSizes.slice(0, visible).reduce((sum, n) => sum + n, 0)
+  return 1 + shown + (visible < groupSizes.length ? 1 : 0)
+}
+
+/** The roving-tabindex control: the last focused one, or the last that still exists once
+ *  groups fold away, so the toolbar never drops out of the Tab order. */
+export function rovingIndex(focusIndex: number, count: number): number {
+  return Math.max(0, Math.min(focusIndex, count - 1))
+}
