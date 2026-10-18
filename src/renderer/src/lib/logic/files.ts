@@ -26,8 +26,10 @@ const INVISIBLE_OR_SPACE = /[\s\p{Cf}]/gu
 /** Bidi embeddings, overrides and isolates, which can make "txt.exe" display as "exe.txt". */
 const BIDI_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/
 
+const utf8 = new TextEncoder()
+
 function byteLength(text: string): number {
-  return new TextEncoder().encode(text).length
+  return utf8.encode(text).length
 }
 
 /** Why `name` can't be used as a file or folder name on `platform`, or null when it's fine.
@@ -86,7 +88,12 @@ export function addedPaths(before: Iterable<string>, after: Iterable<string>): s
 
 const FRONT_MATTER = /^(?:---[ \t]*\n([\s\S]*?)\n(?:---|\.\.\.)|\+\+\+[ \t]*\n([\s\S]*?)\n\+\+\+)[ \t]*(?:\n|$)/
 const FRONT_TITLE = /^title[ \t]*[:=][ \t]*(.+?)[ \t]*$/im
-const FENCE_OPEN = /^\s*(?:>\s*)*(`{3,}|~{3,})(.*)$/
+/** One blockquote or list-item marker, matched again and again from where the last ended:
+ *  a loop of sticky matches can't backtrack the way one regex with a repeated group can. */
+const CONTAINER_MARKER = /[ \t]*(?:>[ \t]?|(?:[-*+]|\d{1,9}[.)])[ \t]+)/y
+const QUOTE_MARKER = /[ \t]*>[ \t]?/y
+const FENCE_AT = /^([ \t]*)(`{3,}|~{3,})(.*)$/
+const FENCE_CLOSE_AT = /^([ \t]*)(`{3,}|~{3,})[ \t]*$/
 const ATX_HEADING = /^ {0,3}#{1,6}(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/
 const HTML_HEADING = /^\s*<h[1-6][^>]*>(.*?)<\/h[1-6]>/i
 const SETEXT_UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/
@@ -354,6 +361,22 @@ function lastSpaceBefore(chars: readonly string[], end: number): number {
   return -1
 }
 
+/** How many of `chars` to keep when at most `room` fit: up to the last space, unless that
+ *  would throw away more than half the room. */
+function wordCutAt(chars: readonly string[], room: number): number {
+  const atBoundary = room < chars.length && /^\s/.test(chars[room])
+  const lastSpace = lastSpaceBefore(chars, room)
+  return atBoundary || lastSpace < room / 2 ? room : lastSpace
+}
+
+const TRAILING_PUNCTUATION = /[\s,;:.\-–—(/]+$/u
+
+/** The first `keep` of `chars`, without punctuation or spaces dangling at the cut. */
+function joinCut(chars: readonly string[], keep: number): string {
+  const cut = chars.slice(0, keep).join('')
+  return cut.replace(TRAILING_PUNCTUATION, '') || cut
+}
+
 /** `text` cut to at most `max` characters (graphemes) on a word boundary. With
  *  `ellipsis`, a cut title ends in "…" (counted in `max`). */
 function cutOnWord(text: string, max: number, ellipsis: boolean): string {
@@ -361,13 +384,25 @@ function cutOnWord(text: string, max: number, ellipsis: boolean): string {
   const chars = firstGraphemes(text, max + 1)
   if (chars.length <= max) return text
   const room = Math.max(0, ellipsis ? max - 1 : max)
-  const atBoundary = /^\s/.test(chars[room])
-  const lastSpace = lastSpaceBefore(chars, room)
-  // Cut at the last space unless that would throw away more than half the room.
-  const keep = atBoundary || lastSpace < room / 2 ? room : lastSpace
-  const cut = chars.slice(0, keep).join('')
-  const tidy = cut.replace(/[\s,;:.\-–—(/]+$/u, '') || cut
+  const tidy = joinCut(chars, wordCutAt(chars, room))
   return ellipsis ? `${tidy}…` : tidy
+}
+
+/** `text` cut on a word boundary (else between graphemes) to at most `maxBytes` UTF-8
+ *  bytes. Short titles can still be long in bytes: a Devanagari conjunct or a skin-toned
+ *  emoji is one character but up to a dozen bytes. */
+function cutToBytes(text: string, maxBytes: number): string {
+  if (byteLength(text) <= maxBytes) return text
+  const chars = firstGraphemes(text, Infinity)
+  let fit = 0
+  let used = 0
+  while (fit < chars.length) {
+    const size = byteLength(chars[fit])
+    if (used + size > maxBytes) break
+    used += size
+    fit++
+  }
+  return joinCut(chars, wordCutAt(chars, fit))
 }
 
 const DEFAULT_TITLE_LENGTH = 48
@@ -403,14 +438,16 @@ function avoidDeviceName(name: string): string {
 /** A safe default file name for a document (title → valid name + ".md"),
  *  "Untitled.md" when there is no usable title. The result passes `validateFileName` on
  *  every platform: unsafe characters become spaces, leading dots (hidden files) and
- *  trailing dots/spaces go, invisible characters are dropped, and Windows device names
- *  get a " (1)" suffix. */
+ *  trailing dots/spaces go, invisible characters are dropped, Windows device names get a
+ *  " (1)" suffix, and a long title is cut on a word boundary to 60 characters and to the
+ *  255-byte name limit. */
 export function suggestFileName(md: string): string {
   const title = rawTitle(md)
   if (!title) return 'Untitled.md'
   const visible = title.replace(INVISIBLE_IN_NAME, '').replace(STRAY_JOINER, '')
   const cleaned = visible.replace(UNSAFE_NAME_CHARS, ' ').replace(/\s+/g, ' ').trim()
-  const short = cutOnWord(cleaned, MAX_SUGGESTED_STEM, false).replace(/^[.\s]+|[.\s]+$/g, '')
+  const stem = cutToBytes(cutOnWord(cleaned, MAX_SUGGESTED_STEM, false), MAX_NAME_LENGTH - '.md'.length)
+  const short = stem.replace(/^[.\s]+|[.\s]+$/g, '')
   if (!short) return 'Untitled.md'
   const name = ensureMdExtension(avoidDeviceName(short))
   return validateFileName(name, 'win32') === null ? name : 'Untitled.md'
@@ -432,17 +469,50 @@ interface Fence {
   marker: string
   /** Language from the info string, lower-cased ("" when none). */
   lang: string
+  /** Column the fence's container content starts at: a closing fence may sit at most 3
+   *  columns past it; a more indented one is code. */
+  indent: number
 }
 
-function fenceOpen(line: string): Fence | null {
-  const m = FENCE_OPEN.exec(line)
-  if (!m || (m[1][0] === '`' && m[2].includes('`'))) return null
-  return { marker: m[1], lang: (m[2].trim().split(/\s+/)[0] ?? '').toLowerCase() }
+/** Display column reached after `line.slice(0, end)`, with tabs to the next multiple of 4. */
+function columnAt(line: string, end: number): number {
+  let column = 0
+  for (let i = 0; i < end; i++) column = line[i] === '\t' ? column + 4 - (column % 4) : column + 1
+  return column
 }
 
+/** Where the run of sticky `marker` matches at the start of `line` ends. */
+function markersEnd(line: string, marker: RegExp): number {
+  let end = 0
+  marker.lastIndex = 0
+  while (marker.exec(line)) end = marker.lastIndex
+  return end
+}
+
+/** The fence `line` opens, after any quote and list markers ("- ```bat" opens one, as in
+ *  CommonMark). A bare fence line belongs to the list whose text starts at `listIndent`
+ *  when it is indented that far. */
+function fenceOpen(line: string, listIndent = 0): Fence | null {
+  const start = markersEnd(line, CONTAINER_MARKER)
+  const m = FENCE_AT.exec(start > 0 ? line.slice(start) : line)
+  if (!m || (m[2][0] === '`' && m[3].includes('`'))) return null
+  const column = columnAt(line, start + m[1].length)
+  const container = start > 0 ? columnAt(line, start) : column >= listIndent ? listIndent : 0
+  return {
+    marker: m[2],
+    lang: (m[3].trim().split(/\s+/)[0] ?? '').toLowerCase(),
+    indent: Math.max(container, column - 3)
+  }
+}
+
+/** True when `line` closes `fence`: the same character, at least as long, nothing after
+ *  it, and at most 3 columns past the fence's container. Quote markers are skipped; a
+ *  line starting with a list marker is code content. */
 function isFenceClose(line: string, fence: Fence): boolean {
-  const m = /^\s*(?:>\s*)*(`{3,}|~{3,})\s*$/.exec(line)
-  return !!m && m[1][0] === fence.marker[0] && m[1].length >= fence.marker.length
+  const start = markersEnd(line, QUOTE_MARKER)
+  const m = FENCE_CLOSE_AT.exec(start > 0 ? line.slice(start) : line)
+  if (!m || m[2][0] !== fence.marker[0] || m[2].length < fence.marker.length) return false
+  return columnAt(line, start + m[1].length) - fence.indent <= 3
 }
 
 function cleanProse(text: string): string {
@@ -505,13 +575,7 @@ function outsideCode(line: string, fn: (text: string) => string): string {
 
 /** Column width of leading whitespace, with tabs to the next multiple of 4. */
 function indentWidth(line: string): number {
-  let width = 0
-  for (const ch of line) {
-    if (ch === ' ') width++
-    else if (ch === '\t') width += 4 - (width % 4)
-    else break
-  }
-  return width
+  return columnAt(line, /^[ \t]*/.exec(line)?.[0].length ?? 0)
 }
 
 const LIST_ITEM = /^([ \t]*(?:[-*+]|\d{1,9}[.)]))([ \t]+|$)/
@@ -574,8 +638,13 @@ function stepPaste(s: PasteState, line: string): { kind: PasteLine; next: PasteS
   if (!blank && !s.afterParagraph && indent >= s.listIndent + 4) {
     return { kind: 'code', next: { ...base, codeIndent: s.listIndent + 4 } }
   }
-  const fence = fenceOpen(line)
-  if (fence) return { kind: 'fence', next: { ...base, fence } }
+  const fence = fenceOpen(line, s.listIndent)
+  if (fence) {
+    // A fence on a list item starts that item's text; one left of the list ends the list.
+    const item = listContentIndent(line)
+    const listIndent = item >= 0 ? item : indent < s.listIndent ? 0 : s.listIndent
+    return { kind: 'fence', next: { ...base, fence, listIndent } }
+  }
   const raw = RAW_HTML_OPEN.exec(line)?.[1].toLowerCase()
   // An inline <code>…</code> starting a line is prose with a code element in it.
   if (raw && !(raw === 'code' && closesRaw(line, raw))) {

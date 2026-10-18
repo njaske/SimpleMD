@@ -19,6 +19,18 @@ const ZWJ = String.fromCharCode(0x200d)
 const NBSP = String.fromCharCode(0xa0)
 const NNBSP = String.fromCharCode(0x202f)
 
+/** Median wall time of `runs` calls after a warm-up, so one GC pause or a machine busy
+ *  with the other test files can't fail a speed check. */
+function medianMs(fn: () => void, runs = 5): number {
+  fn()
+  const times = Array.from({ length: runs }, () => {
+    const started = performance.now()
+    fn()
+    return performance.now() - started
+  })
+  return times.sort((a, b) => a - b)[runs >> 1]
+}
+
 describe('isMarkdownName / ensureMdExtension', () => {
   it('recognizes Markdown extensions case-insensitively', () => {
     for (const name of ['a.md', 'A.MD', 'b.markdown', 'c.mdown', 'd.mkd', 'e.mdx', 'f.markdn']) {
@@ -173,6 +185,20 @@ describe('titleFromMarkdown', () => {
   it('ignores headings inside fenced code', () => {
     assert.equal(titleFromMarkdown('```bash\n# install it\nnpm i\n```\n\n## Real title'), 'Real title')
     assert.equal(titleFromMarkdown('~~~\n# not this\n~~~\nPlain first line'), 'Plain first line')
+  })
+
+  it('ignores headings inside a fence opened on a list item or in a quote', () => {
+    assert.equal(titleFromMarkdown('Intro paragraph\n- ```\n  # Secret\n  ```\n'), 'Intro paragraph')
+    assert.equal(titleFromMarkdown('1. ```md\n   # Secret\n   ```\n\n# Real'), 'Real')
+    assert.equal(titleFromMarkdown('> - ```\n>   # Secret\n>   ```\n\n## Real'), 'Real')
+  })
+
+  it('keeps a fence open past an indented fence line inside it', () => {
+    // Arrange: the "```" indented 4 columns is code, so "# inside" is still in the block
+    const md = '```md\n    ```\n# inside\n```\n\n# Real'
+
+    // Act / Assert
+    assert.equal(titleFromMarkdown(md), 'Real')
   })
 
   it('falls back to the first line with readable words', () => {
@@ -342,13 +368,13 @@ describe('titleFromMarkdown', () => {
       const md = unit.repeat(Math.ceil(100_000 / unit.length))
 
       // Act
-      const started = performance.now()
-      titleFromMarkdown(md)
-      suggestFileName(md)
-      const elapsed = performance.now() - started
+      const ms = medianMs(() => {
+        titleFromMarkdown(md)
+        suggestFileName(md)
+      }, 3)
 
       // Assert
-      assert.ok(elapsed < 500, `${JSON.stringify(unit)} took ${elapsed.toFixed(1)} ms`)
+      assert.ok(ms < 500, `${JSON.stringify(unit)} took ${ms.toFixed(1)} ms`)
     }
   })
 
@@ -357,13 +383,12 @@ describe('titleFromMarkdown', () => {
     const md = `${'Some paragraph text.\n'.repeat(100_000)}# Late heading`
 
     // Act
-    const started = performance.now()
     const t = titleFromMarkdown(md)
-    const elapsed = performance.now() - started
+    const ms = medianMs(() => titleFromMarkdown(md), 3)
 
     // Assert
     assert.equal(t, 'Late heading')
-    assert.ok(elapsed < 1500, `took ${elapsed.toFixed(1)} ms`)
+    assert.ok(ms < 1500, `took ${ms.toFixed(1)} ms`)
   })
 })
 
@@ -407,6 +432,26 @@ describe('suggestFileName', () => {
     assert.ok(!name.includes('…'))
     assert.ok(name.length <= 63, name)
     assert.match(name, /^word( word)*\.md$/)
+  })
+
+  it('shortens a long title in a script with many-byte characters to fit 255 bytes', () => {
+    // Arrange: 60 characters of these are well over the 255-byte name limit
+    const titles = ['क्षत्रिय '.repeat(12), '👍🏽 '.repeat(40), `${'क्षत्रिय'.repeat(30)}`]
+    for (const title of titles) {
+      // Act
+      const name = suggestFileName(`# ${title}`)
+
+      // Assert: a real, shortened name, cut between words (or characters) of the title
+      assert.notEqual(name, 'Untitled.md', title)
+      assert.ok(new TextEncoder().encode(name).length <= 255, name)
+      assert.ok(title.startsWith(name.slice(0, -'.md'.length)), name)
+      assert.equal(validateFileName(name, 'linux'), null, name)
+    }
+  })
+
+  it('cuts a many-byte title on a word boundary', () => {
+    const name = suggestFileName(`# ${'क्षत्रिय '.repeat(12)}`)
+    assert.match(name, /^क्षत्रिय( क्षत्रिय)*\.md$/)
   })
 
   it('drops invisible and text-direction characters from pasted titles', () => {
@@ -569,6 +614,55 @@ describe('normalizePastedMarkdown', () => {
     assert.equal(normalizePastedMarkdown(md), `${md}\n`)
   })
 
+  it('treats a fence opened on a list item line as code', () => {
+    // Arrange: "- ```bat" opens a block whose "copy" line is a real command
+    const md = `- \`\`\`bat\n  copy\n  \`\`\`\n\nText${NBSP}here\n\n\`\`\`\ncode${NBSP}x${ZWSP}\n\`\`\``
+
+    // Act
+    const out = normalizePastedMarkdown(md)
+
+    // Assert: both blocks kept byte for byte, the prose between them cleaned
+    assert.equal(out, `- \`\`\`bat\n  copy\n  \`\`\`\n\nText here\n\n\`\`\`\ncode${NBSP}x${ZWSP}\n\`\`\`\n`)
+  })
+
+  it('keeps no-break spaces inside a fence on a numbered or quoted list item', () => {
+    for (const md of [`1. \`\`\`bash\n   echo${NBSP}hi\n   \`\`\``, `> - ~~~\n>   a${NBSP}b\n>   ~~~`, `- a\n  - \`\`\`\n    x${NBSP}\n    \`\`\``]) {
+      assert.equal(normalizePastedMarkdown(md), `${md}\n`, md)
+    }
+  })
+
+  it('continues the list after a fence on a list item closes', () => {
+    // Arrange: text at the item's indent continues the item, so it is not indented code
+    const md = `- \`\`\`sh\n  x\n  \`\`\`\n\n  more${NBSP}text`
+
+    // Act / Assert
+    assert.equal(normalizePastedMarkdown(md), `- \`\`\`sh\n  x\n  \`\`\`\n\n  more text\n`)
+  })
+
+  it('does not close a fence at a fence line indented 4 or more columns', () => {
+    // Arrange: the indented ``` is part of the Python string, not the end of the block
+    const md = `\`\`\`python\ndoc = """\n    \`\`\`\n"""\nx = "a${NBSP}b"\n\`\`\`\nafter${NBSP}`
+
+    // Act / Assert
+    assert.equal(normalizePastedMarkdown(md), `\`\`\`python\ndoc = """\n    \`\`\`\n"""\nx = "a${NBSP}b"\n\`\`\`\nafter \n`)
+  })
+
+  it('closes a fence indented up to 3 columns past its container', () => {
+    const md = `\`\`\`\na${NBSP}\n   \`\`\`\nb${NBSP}\n- \`\`\`\n  c${NBSP}\n     \`\`\`\nd${NBSP}`
+    assert.equal(normalizePastedMarkdown(md), `\`\`\`\na${NBSP}\n   \`\`\`\nb \n- \`\`\`\n  c${NBSP}\n     \`\`\`\nd \n`)
+  })
+
+  it('stays fast on a line of thousands of list and quote markers', () => {
+    // Arrange: markers with runs of spaces, which a backtracking regex would explode on
+    const line = `${'-    >   1.   '.repeat(5000)}x`
+
+    // Act
+    const ms = medianMs(() => normalizePastedMarkdown(`${line}\n${line}`))
+
+    // Assert
+    assert.ok(ms < 300, `took ${ms.toFixed(1)} ms`)
+  })
+
   it('needs a matching fence to close a block', () => {
     const md = `\`\`\`\`md\n\`\`\`\ninner${NBSP}\n\`\`\`\n\`\`\`\`\nout${NBSP}`
     assert.equal(normalizePastedMarkdown(md), `\`\`\`\`md\n\`\`\`\ninner${NBSP}\n\`\`\`\n\`\`\`\`\nout \n`)
@@ -595,12 +689,10 @@ describe('normalizePastedMarkdown', () => {
     const line = Array.from({ length: 40_000 }, (_, i) => `${'`'.repeat((i % 200) + 1)}x`).join(' ')
 
     // Act
-    const started = performance.now()
-    normalizePastedMarkdown(line)
-    const elapsed = performance.now() - started
+    const ms = medianMs(() => normalizePastedMarkdown(line))
 
     // Assert
-    assert.ok(elapsed < 300, `took ${elapsed.toFixed(1)} ms`)
+    assert.ok(ms < 300, `took ${ms.toFixed(1)} ms`)
   })
 
   it('handles a large paste quickly', () => {
@@ -609,12 +701,11 @@ describe('normalizePastedMarkdown', () => {
     const text = block.repeat(20_000)
 
     // Act
-    const started = performance.now()
     const out = normalizePastedMarkdown(text)
-    const elapsed = performance.now() - started
+    const ms = medianMs(() => normalizePastedMarkdown(text), 3)
 
     // Assert
     assert.ok(!out.includes(NBSP))
-    assert.ok(elapsed < 1500, `took ${elapsed.toFixed(1)} ms`)
+    assert.ok(ms < 1500, `took ${ms.toFixed(1)} ms`)
   })
 })
