@@ -38,12 +38,12 @@ function copyButton(pre: HTMLElement): HTMLButtonElement {
   const button = document.createElement('button')
   button.type = 'button'
   button.className = 'smd-copy'
-  button.setAttribute('aria-label', 'Copy code')
   button.title = 'Copy code'
   const label = document.createElement('span')
   label.textContent = 'Copy'
   const reset = (): void => {
     button.classList.remove('is-copied')
+    button.setAttribute('aria-label', 'Copy code')
     button.innerHTML = COPY_ICON
     label.textContent = 'Copy'
     button.appendChild(label)
@@ -53,6 +53,8 @@ function copyButton(pre: HTMLElement): HTMLButtonElement {
     const text = pre.querySelector('code')?.textContent ?? ''
     navigator.clipboard?.writeText(text).catch(() => undefined)
     button.classList.add('is-copied')
+    // The name changes with the label, so screen readers confirm the copy too.
+    button.setAttribute('aria-label', 'Copied')
     button.innerHTML = CHECK_ICON
     label.textContent = 'Copied'
     button.appendChild(label)

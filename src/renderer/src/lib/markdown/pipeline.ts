@@ -1,6 +1,6 @@
 import { Marked, type Token, type Tokens, type TokensList } from 'marked'
 import { calloutExtension } from './callouts'
-import { footnoteExtension } from './footnotes'
+import { alignFootnotes, footnoteExtension, type ChunkFootnotes } from './footnotes'
 import { extractFrontMatter, renderFrontMatter } from './frontMatter'
 import { mathExtensions, renderMathFence } from './math'
 import { repairMarkdown } from './repairs'
@@ -14,8 +14,10 @@ import { assignSpans, tokenSpans, withLineAttrs, type LineMapper } from './sourc
 const TASK_PLACEHOLDER = 'data-smd-task=""'
 
 // Attribute names the renderer owns. Raw HTML in a document can't forge them (a fake
-// data-task-line would make an author-written checkbox toggle a line).
-const OWN_ATTRS = /\bdata-(task-line|smd-task|line-end|line)\b/gi
+// data-task-line would make an author-written checkbox toggle a line). Only a name
+// followed by `=` is rewritten: without a value the attribute is harmless, and prose
+// inside an HTML block ("set the data-line attribute") keeps its words.
+const OWN_ATTRS = /\bdata-(task-line|smd-task|line-end|line)(?=\s*=)/gi
 
 function createMarked(): Marked {
   return new Marked({ gfm: true, breaks: false })
@@ -68,6 +70,10 @@ function lex(src: string): TokensList {
   }
 }
 
+function walkTokens(tokens: Token[], visit: (token: Token) => void): void {
+  getMarked().walkTokens(tokens, visit)
+}
+
 function renderBlocks(tokens: readonly Token[]): string {
   const md = getMarked()
   let html = ''
@@ -86,8 +92,11 @@ export interface SourceOptions {
   lineOffset: number
   /** Recognise leading front matter (only the first chunk of a document can have it). */
   frontMatter: boolean
-  /** Extra Markdown parsed after the text but not mapped (shared reference links). */
+  /** Extra Markdown parsed after the text but not mapped (shared reference links and
+   *  footnote definitions). */
   appendix: string
+  /** Progressive chunks: footnote numbering of the whole document. */
+  footnotes?: ChunkFootnotes | null
 }
 
 export interface SourceResult {
@@ -105,7 +114,8 @@ export function renderSource(md: string, opts: SourceOptions): SourceResult {
   const src = repaired.lines.join('\n') + (opts.appendix ? '\n\n' + opts.appendix + '\n' : '')
   const lastLine = repaired.map.length - 1
   const toOriginal: LineMapper = (line) => repaired.map[Math.max(0, Math.min(line, lastLine))] + opts.lineOffset
-  const tokens = lex(src)
+  const lexed = lex(src)
+  const tokens = opts.footnotes ? alignFootnotes(lexed, opts.footnotes, walkTokens) : lexed
   assignSpans(tokens, src, toOriginal)
   const card = fm ? renderFrontMatter(fm, opts.lineOffset) : ''
   return { html: card + renderBlocks(tokens), fixes: repaired.fixes }

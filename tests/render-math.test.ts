@@ -101,6 +101,19 @@ After.`
   })
 })
 
+describe('dollar math next to code', () => {
+  it('never pairs a $ in prose with one inside a code span', () => {
+    const html = render('The variable $PATH is set by `export PATH=$HOME/bin:$PATH`, so run it first.')
+    assert.deepEqual(formulas(html), [])
+    assert.equal(parseHtml(html).querySelector('code')?.textContent, 'export PATH=$HOME/bin:$PATH')
+  })
+
+  it('still renders math beside a code span', () => {
+    const html = render('Set $x = 2$ with `let x = 2` and $$y$$ too.')
+    assert.deepEqual(formulas(html), ['x = 2', 'y'])
+  })
+})
+
 describe('sanitized math output', () => {
   it('keeps the KaTeX markup through the sanitizer', async () => {
     await markdown.prepareMarkdown('$x$')

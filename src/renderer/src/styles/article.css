@@ -11,6 +11,10 @@
   --link: var(--accent-fg, var(--accent, #a8321f));
   --ui: var(--ui-font, 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif);
   --code-font: var(--mono, 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace);
+  /* Headings track tighter in Sans mode (Inter wants it at display sizes): the app
+     sets --read-heading-tracking, or data-read-font="sans" on .smd-root. */
+  --heading-tracking: var(--read-heading-tracking, -0.01em);
+  --find-current: var(--mark-current, #f2a900);
   max-width: calc(var(--read-width, 720px) + var(--gutter) * 2);
   margin: 0 auto;
   padding: 56px var(--gutter) 168px;
@@ -26,6 +30,7 @@
   overflow-wrap: break-word;
   hanging-punctuation: first;
 }
+.smd-root[data-read-font='sans'] .smd-article { --heading-tracking: var(--read-heading-tracking, -0.02em); }
 @container (max-width: 680px) {
   .smd-article { --gutter: 24px; padding-top: 36px; padding-bottom: 120px; }
 }
@@ -39,12 +44,17 @@
   color: var(--fg, #1f1e1c);
   font-weight: 650;
   line-height: 1.25;
-  letter-spacing: -0.01em;
+  letter-spacing: var(--heading-tracking, -0.01em);
   margin: 1.9em 0 0.55em;
   scroll-margin-top: 24px;
   text-wrap: balance;
 }
-.smd-article h1 { font-size: 2em; line-height: 1.2; letter-spacing: -0.015em; margin: 1.4em 0 0.5em; }
+.smd-article h1 {
+  font-size: 2em;
+  line-height: 1.2;
+  letter-spacing: calc(var(--heading-tracking, -0.01em) - 0.005em);
+  margin: 1.4em 0 0.5em;
+}
 .smd-article h2 { font-size: 1.45em; }
 .smd-article h3 { font-size: 1.2em; margin-top: 1.7em; }
 .smd-article h4 { font-size: 1em; margin-top: 1.6em; }
@@ -362,8 +372,16 @@
 .smd-article .smd-math { margin: 1.3em 0; overflow-x: auto; overflow-y: hidden; }
 .smd-article .smd-math > .katex-display { margin: 0; overflow: visible; }
 
-.smd-article .smd-mermaid { display: flex; justify-content: center; margin: 1.9em 0; overflow-x: auto; }
-.smd-article .smd-mermaid svg { max-width: 100%; height: auto; }
+.smd-article .smd-mermaid { display: flex; margin: 1.9em 0; overflow-x: auto; overscroll-behavior-x: contain; }
+/* Natural size when it fits; a wide diagram shrinks to the column, but only to 60% of
+   its size (mermaid.ts sets the widths) so labels stay readable, then scrolls.
+   Auto margins center it without hiding an overflowing left edge. */
+.smd-article .smd-mermaid > svg {
+  flex: none;
+  margin-inline: auto;
+  width: min(var(--smd-diagram-width, 100%), max(100%, var(--smd-diagram-min, 0px)));
+  height: auto;
+}
 .smd-article .smd-mermaid:empty {
   min-height: 140px;
   border-radius: var(--radius-m, 10px);
@@ -537,7 +555,7 @@
 }
 
 ::highlight(smd-find) { background-color: var(--mark-soft, rgb(245 196 0 / 0.42)); color: inherit; }
-::highlight(smd-find-current) { background-color: var(--mark-current, #f2a900); color: #1f1e1c; }
+::highlight(smd-find-current) { background-color: var(--find-current, var(--mark-current, #f2a900)); color: #1f1e1c; }
 
 /* ---- Print -------------------------------------------------------------------- */
 

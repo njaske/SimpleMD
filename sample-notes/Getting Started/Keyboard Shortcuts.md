@@ -2,7 +2,7 @@
 
 A short, honest list. Nothing you need to memorize: press `Ctrl` + `K` (`Cmd` + `K` on a Mac) to find any command by name, and `Ctrl` + `/` to see this list inside the app.
 
-On macOS, read `Ctrl` as `Cmd` in every row below.
+On macOS, read `Ctrl` as `Cmd` in every row below, except `Ctrl` + `Tab` and `Ctrl` + `Shift` + `Tab`: those stay on the `Control` key, because `Cmd` + `Tab` switches apps.
 
 ## Documents
 

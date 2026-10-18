@@ -117,7 +117,7 @@ export class ReaderController {
   private view: ReaderView = { mode: 'read', theme: 'light', blockRemoteImages: false }
 
   private progressive: Progressive | null = null
-  private slugs: HeadingSlugs = { byLine: new Map(), used: new Set() }
+  private slugs: HeadingSlugs = { byLine: new Map(), used: new Set(), next: new Map() }
   private fixes: string[] = []
   private blockedImages = 0
   private allowRemoteFor: string | null = null

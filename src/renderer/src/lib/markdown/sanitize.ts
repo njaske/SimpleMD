@@ -6,9 +6,12 @@ import DOMPurify, { type Config, type DOMPurify as Purifier } from 'dompurify'
 
 // Inline styles that would let a document escape its own column: cover the app
 // with a fake prompt (fixed/sticky, z-index, inset) or fetch remote resources
-// (url(), @import). KaTeX itself relies on relative/absolute positioning, top,
-// left and sizes, so those stay allowed.
-const UNSAFE_STYLE = /position\s*:\s*(fixed|sticky)|z-index|inset|url\s*\(|@import|expression\s*\(|behavior/i
+// (url(), image-set() and the other image functions, @import). A backslash is a CSS
+// escape (`u\72l(` still parses as url()), and KaTeX never writes one, so any style
+// with one goes too. KaTeX itself relies on relative/absolute positioning, top, left
+// and sizes, so those stay allowed.
+const UNSAFE_STYLE =
+  /\\|position\s*:\s*(fixed|sticky)|z-index|inset|(?:url|image|image-set|cross-fade|element|src)\s*\(|@import|expression\s*\(|behavior/i
 
 // <style> would restyle the whole reader; forms and interactive elements are a
 // phishing surface; media and embeds fetch or run things (SVG <image>/<feImage> and
@@ -52,8 +55,10 @@ function cleanInput(node: Element): void {
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
-/** url(...) pointing anywhere but into the same document (fill="url(#grad)" is fine). */
-const EXTERNAL_URL = /url\s*\(\s*(?!['"]?\s*#)/i
+/** A CSS value that may fetch: url(...) pointing anywhere but into the same document
+ *  (fill="url(#grad)" is fine), another image function, or a CSS escape that could
+ *  spell one. SVG presentation attributes are parsed as CSS. */
+const FETCHING_VALUE = /\\|url\s*\(\s*(?!['"]?\s*#)|(?:image|image-set|cross-fade|element|src)\s*\(/i
 
 /** SVG references may only point inside the document: an external href or url() is
  *  a fetch (and `<use>`-style references could pull in outside markup). Links keep
@@ -63,7 +68,7 @@ function cleanSvgRefs(node: Element): void {
   for (const name of node.getAttributeNames()) {
     const value = node.getAttribute(name) || ''
     const isRef = name === 'href' || name === 'xlink:href'
-    if (isRef ? !isLink && !value.trim().startsWith('#') : EXTERNAL_URL.test(value)) node.removeAttribute(name)
+    if (isRef ? !isLink && !value.trim().startsWith('#') : FETCHING_VALUE.test(value)) node.removeAttribute(name)
   }
 }
 

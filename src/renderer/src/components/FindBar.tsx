@@ -23,6 +23,18 @@ function Icon({ d }: { d: string }) {
   )
 }
 
+/** Put focus back where it was before the bar opened (usually the reader), so arrow
+ *  and Page keys keep scrolling after Esc. Only when focus was in the bar: a click
+ *  elsewhere that closed it keeps its own focus. */
+function restoreFocus(before: Element | null, bar: HTMLElement | null, reader: ReaderController): void {
+  const active = document.activeElement
+  if (active && active !== document.body && !bar?.contains(active)) return
+  const target = before instanceof HTMLElement && before.isConnected && before !== document.body
+    ? before
+    : reader.getArticle()?.closest<HTMLElement>('.smd-reader')
+  target?.focus({ preventScroll: true })
+}
+
 function status(query: string, result: FindResult): string {
   if (!query) return ''
   if (!result.total) return 'No results'
@@ -33,8 +45,16 @@ export default function FindBar({ reader, initialQuery = '', onClose }: FindBarP
   const [query, setQuery] = useState(initialQuery)
   const [result, setResult] = useState<FindResult>(NONE)
   const input = useRef<HTMLInputElement>(null)
+  const bar = useRef<HTMLDivElement>(null)
   // A search-as-you-type still waiting for typing to pause (huge documents only).
   const pending = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Before focusing the input, remember what had focus.
+  useEffect(() => {
+    const before = document.activeElement
+    const node = bar.current
+    return () => restoreFocus(before, node, reader)
+  }, [reader])
 
   useEffect(() => {
     input.current?.focus()
@@ -105,7 +125,7 @@ export default function FindBar({ reader, initialQuery = '', onClose }: FindBarP
   const empty = !!query && !result.total
 
   return (
-    <div className="smd-findbar smd-pop" role="search" aria-label="Find in document" onKeyDown={onKeyDown}>
+    <div ref={bar} className="smd-findbar smd-pop" role="search" aria-label="Find in document" onKeyDown={onKeyDown}>
       <div className={'smd-findbar-field' + (empty ? ' is-empty' : '')}>
         <svg className="smd-findbar-glass" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
           strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">

@@ -61,9 +61,11 @@ export function offsetOfLine(anchors: readonly Anchor[], line: number): number |
 
 /** The line attributes of a rendered block, or null when it has none. */
 export function blockLines(el: Element): { start: number; end: number } | null {
-  const start = Number(el.getAttribute('data-line'))
+  // Digits only: a bare, value-less data-line from raw HTML would read as line 0.
+  const raw = el.getAttribute('data-line')
+  if (!raw || !/^\d+$/.test(raw)) return null
+  const start = Number(raw)
   const end = Number(el.getAttribute('data-line-end'))
-  if (!el.hasAttribute('data-line') || !Number.isFinite(start)) return null
   return { start, end: Number.isFinite(end) && end > start ? end : start + 1 }
 }
 

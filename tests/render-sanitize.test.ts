@@ -69,6 +69,37 @@ describe('sanitizer', () => {
     assert.deepEqual(styles, [null, null, 'color:red'])
   })
 
+  it('drops styles that hide a fetch behind a CSS escape or an image function', () => {
+    // Arrange: u\72l( is url( once CSS unescapes it
+    const md = [
+      '<div style="background:u\\72l(https://t.example/a.png)">a</div>',
+      '<div style="background:image-set(\'https://t.example/b.png\' 1x)">b</div>',
+      '<div style="background:-webkit-image-set(\'https://t.example/c.png\' 1x)">c</div>',
+      '<div style="background:cross-fade(url(x), \'https://t.example/d.png\')">d</div>',
+      '<svg><rect fill="u\\72l(https://t.example/e.svg#p)" width="4" height="4"/></svg>',
+      '<span style="color:#a00;font-weight:600">kept</span>'
+    ].join('\n\n')
+    // Act
+    const html = renderMarkdown(md).html
+    // Assert
+    assert.doesNotMatch(html, /t\.example/)
+    assert.equal(parseHtml(html).querySelector('span')?.getAttribute('style'), 'color:#a00;font-weight:600')
+  })
+
+  it('keeps prose about the line attributes inside HTML blocks', () => {
+    const doc = render('<div>\nSet the data-line attribute, or data-task-line.\n</div>\n\n<details><summary>About data-task-line</summary>x</details>')
+    assert.equal(doc.querySelector('div')?.textContent?.trim(), 'Set the data-line attribute, or data-task-line.')
+    assert.equal(doc.querySelector('summary')?.textContent, 'About data-task-line')
+  })
+
+  it('still rewrites forged line attributes in raw HTML', () => {
+    const doc = render('<div>\n<p data-line="40" data-line-end = "41">x</p>\n</div>')
+    const p = doc.querySelector('p')
+    assert.equal(p?.hasAttribute('data-line'), false)
+    assert.equal(p?.hasAttribute('data-line-end'), false)
+    assert.equal(doc.querySelector('div')?.getAttribute('data-line'), '0')
+  })
+
   it('drops every remote fetch outside <img>: SVG image/feImage, mglyph, background, external SVG refs', () => {
     // Arrange
     const md = [

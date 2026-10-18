@@ -12,36 +12,47 @@ export interface HeadingSlugs {
   byLine: Map<number, string>
   /** Ids already taken (every outline slug is reserved up front). */
   used: Set<string>
+  /** Next suffix to try per base slug, so a run of identical headings stays linear. */
+  next: Map<string, number>
 }
 
 /** Outline slugs of `md`, computed once per render. */
 export function headingSlugs(md: string): HeadingSlugs {
-  const outline = computeOutline(md)
+  // Line numbers follow the renderer, which reads CRLF and lone CR as line breaks
+  // (Windows files); a trailing CR would also make every ATX heading fail to match.
+  const text = md.includes('\r') ? md.replace(/\r\n?/g, '\n') : md
+  const outline = computeOutline(text)
   const byLine = new Map<number, string>()
-  headingLines(md).forEach((line, i) => {
+  headingLines(text).forEach((line, i) => {
     if (outline[i]) byLine.set(line, outline[i].slug)
   })
-  return { byLine, used: new Set(outline.map((entry) => entry.slug)) }
+  return { byLine, used: new Set(outline.map((entry) => entry.slug)), next: new Map() }
+}
+
+/** A unique id for `base`. `used` only ever grows, so resuming from the last suffix
+ *  tried gives the same ids as counting up from 1 each time. */
+function uniqueId(base: string, slugs: HeadingSlugs): string {
+  let k = slugs.next.get(base) ?? 1
+  let id = base
+  while (slugs.used.has(id)) id = `${base}-${k++}`
+  slugs.next.set(base, k)
+  slugs.used.add(id)
+  return id
 }
 
 /** Give the top-level headings under `root` the outline's slugs, matched by source line;
  *  other headings (setext, nested in callouts) get a unique slug of their text. */
 export function assignHeadingIds(root: ParentNode, slugs: HeadingSlugs): void {
-  const { byLine: slugByLine, used } = slugs
   root.querySelectorAll<HTMLElement>(HEADINGS).forEach((h) => {
     if (h.id || h.closest('.smd-footnotes')) return
     const at = blockLines(h)
-    const slug = at ? slugByLine.get(at.start) : undefined
+    const slug = at ? slugs.byLine.get(at.start) : undefined
     if (slug) {
       h.id = slug
       h.dataset.outline = ''
       return
     }
-    const base = slugify(h.textContent || '') || 'section'
-    let id = base
-    for (let k = 1; used.has(id); k++) id = `${base}-${k}`
-    used.add(id)
-    h.id = id
+    h.id = uniqueId(slugify(h.textContent || '') || 'section', slugs)
   })
 }
 

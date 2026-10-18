@@ -179,4 +179,37 @@ describe('progressive rendering plan', () => {
     const html = renderMarkdown(plan[1].src, plan[1].options).html
     assert.match(html, /href="https:\/\/example.com"/)
   })
+
+  it('numbers footnotes across chunks and renders one Footnotes section at the end', () => {
+    // Arrange: references in the first and a later chunk, definitions at the very end
+    const filler = 'Filler paragraph with enough words to fill a chunk. '.repeat(8) + '\n\n'
+    const md = [
+      'Opening claim.[^big] A second note.[^two] Code `[^big]` stays code.',
+      filler.repeat(2600),
+      'Later reference to the same note.[^big]',
+      filler.repeat(300),
+      '[^big]: The big note,\n    continued on an indented line.',
+      '[^two]: The second note.'
+    ].join('\n\n')
+    // Act
+    const plan = planProgressive(md)
+    const html = plan.map((chunk) => renderMarkdown(chunk.src, chunk.options).html).join('')
+    const doc = parseHtml(html)
+    // Assert
+    assert.ok(isLargeDocument(md) && plan.length > 3)
+    assert.deepEqual(Array.from(doc.querySelectorAll('code'), (c) => c.textContent), ['[^big]'])
+    assert.doesNotMatch(doc.textContent?.replace('[^big]', '') ?? '', /\[\^/, 'every reference resolves')
+    const refs = Array.from(doc.querySelectorAll('a[data-footnote-ref]'))
+    assert.deepEqual(refs.map((a) => a.textContent), ['1', '2', '1'])
+    assert.deepEqual(refs.map((a) => a.id), ['footnote-ref-big', 'footnote-ref-two', 'footnote-ref-big-2'])
+    const sections = doc.querySelectorAll('section.smd-footnotes')
+    assert.equal(sections.length, 1)
+    assert.equal(doc.querySelectorAll('#footnote-label').length, 1)
+    assert.ok(html.trimEnd().endsWith('</section>'), 'the section comes last')
+    const items = Array.from(sections[0].querySelectorAll('li'))
+    assert.deepEqual(items.map((li) => li.id), ['footnote-big', 'footnote-two'])
+    assert.match(items[0].textContent ?? '', /continued on an indented line/)
+    const back = Array.from(items[0].querySelectorAll('a[data-footnote-backref]'), (a) => a.getAttribute('href'))
+    assert.deepEqual(back, ['#footnote-ref-big', '#footnote-ref-big-2'])
+  })
 })

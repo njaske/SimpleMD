@@ -128,6 +128,13 @@ const blockMath: TokenizerAndRendererExtension = {
   }
 }
 
+/** Inline math runs before code spans, so a `$` in prose could otherwise pair with
+ *  one inside code ("$PATH is set by `export PATH=$HOME`"). TeX never needs a
+ *  backtick, so a candidate containing one isn't math. */
+function reachesIntoCode(body: string): boolean {
+  return body.includes('`')
+}
+
 const displayMath: TokenizerAndRendererExtension = {
   name: 'displayMath',
   level: 'inline',
@@ -139,7 +146,7 @@ const displayMath: TokenizerAndRendererExtension = {
   },
   tokenizer(src: string) {
     const m = /^\$\$([\s\S]+?)\$\$/.exec(src)
-    if (!m) return undefined
+    if (!m || reachesIntoCode(m[1])) return undefined
     return mathToken('displayMath', m[0], m[1], true)
   },
   renderer: renderMathToken
@@ -154,7 +161,7 @@ const inlineMath: TokenizerAndRendererExtension = {
   },
   tokenizer(src: string) {
     const m = /^\$(?![$\s])((?:\\\$|[^$])+?)(?<!\s)\$(?!\d)/.exec(src)
-    if (!m) return undefined
+    if (!m || reachesIntoCode(m[1])) return undefined
     return mathToken('inlineMath', m[0], m[1], false)
   },
   renderer: renderMathToken
@@ -180,7 +187,7 @@ const parenMath: TokenizerAndRendererExtension = {
   start: (src: string) => backslashStart(src, '('),
   tokenizer(src: string) {
     const m = PAREN.exec(src)
-    if (!m || m[1].includes('`')) return undefined
+    if (!m || reachesIntoCode(m[1])) return undefined
     return mathToken('parenMath', m[0], m[1], false)
   },
   renderer: renderMathToken
@@ -192,7 +199,7 @@ const bracketMath: TokenizerAndRendererExtension = {
   start: (src: string) => backslashStart(src, '['),
   tokenizer(src: string) {
     const m = BRACKET.exec(src)
-    if (!m || m[1].includes('`') || !looksLikeFormula(m[1])) return undefined
+    if (!m || reachesIntoCode(m[1]) || !looksLikeFormula(m[1])) return undefined
     return mathToken('bracketMath', m[0], m[1], true)
   },
   renderer: renderMathToken

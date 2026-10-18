@@ -4,7 +4,8 @@ import { isHighlighterSettled, loadHighlighter } from './highlight'
 import { escapeHtml } from './markdown/escape'
 import { isKatexReady, isKatexSettled, loadKatex, needsKatex } from './markdown/math'
 import { renderSource } from './markdown/pipeline'
-import { collectRefDefs, PROGRESSIVE_CHARS, splitForProgressive } from './markdown/progressive'
+import type { ChunkFootnotes } from './markdown/footnotes'
+import { collectRefDefs, planFootnotes, PROGRESSIVE_CHARS, splitForProgressive } from './markdown/progressive'
 import { sanitizeHtml } from './markdown/sanitize'
 
 // Public entry to the Markdown renderer. The pipeline lives in lib/markdown/:
@@ -21,8 +22,11 @@ export interface RenderOptions {
   lineOffset?: number
   /** Show leading YAML front matter as a properties card. Default true. */
   frontMatter?: boolean
-  /** Markdown parsed after the text but not shown or mapped (shared reference links). */
+  /** Markdown parsed after the text but not shown or mapped (shared reference links
+   *  and footnote definitions). */
   appendix?: string
+  /** Footnote numbering of the whole document (progressive chunks). */
+  footnotes?: ChunkFootnotes | null
   /** One chunk of a progressive render: cached separately from whole documents. */
   chunk?: boolean
 }
@@ -48,9 +52,11 @@ const HTML_SEP = '\u0000'
 
 function cacheKey(md: string, opts: Required<RenderOptions>): string {
   // Everything that changes the output: KaTeX availability (math renders as source
-  // before it loads), the line offset, front matter handling and the appendix.
-  const flags = `${isKatexReady() ? 1 : 0}${opts.frontMatter ? 1 : 0}:${opts.lineOffset}:${opts.appendix.length}:`
-  return flags + opts.appendix + HTML_SEP + md
+  // before it loads), the line offset, front matter handling, the appendix and the
+  // footnote numbering.
+  const notes = opts.footnotes ? JSON.stringify(opts.footnotes) : ''
+  const flags = `${isKatexReady() ? 1 : 0}${opts.frontMatter ? 1 : 0}:${opts.lineOffset}:${opts.appendix.length}:${notes.length}:`
+  return flags + notes + opts.appendix + HTML_SEP + md
 }
 
 function encode(result: RenderResult): string {
@@ -83,6 +89,7 @@ export function renderMarkdown(md: string, options: RenderOptions = {}): RenderR
     lineOffset: options.lineOffset ?? 0,
     frontMatter: options.frontMatter ?? true,
     appendix: options.appendix ?? '',
+    footnotes: options.footnotes ?? null,
     chunk: options.chunk ?? false
   }
   const source = md ?? ''
@@ -113,10 +120,12 @@ export function isLargeDocument(md: string): boolean {
 
 /** The chunks of a large document, in order; render each with renderMarkdown. */
 export function planProgressive(md: string): RenderChunk[] {
-  const appendix = collectRefDefs(md)
-  return splitForProgressive(md).map((chunk, i) => ({
+  const chunks = splitForProgressive(md)
+  const notes = planFootnotes(md, chunks)
+  const appendix = [collectRefDefs(md), notes?.defs ?? ''].filter(Boolean).join('\n\n')
+  return chunks.map((chunk, i) => ({
     src: chunk.src,
-    options: { lineOffset: chunk.lineOffset, frontMatter: i === 0, appendix, chunk: true }
+    options: { lineOffset: chunk.lineOffset, frontMatter: i === 0, appendix, footnotes: notes?.chunks[i] ?? null, chunk: true }
   }))
 }
 

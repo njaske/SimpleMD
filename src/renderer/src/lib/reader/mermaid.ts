@@ -78,6 +78,19 @@ function showError(job: MermaidJob): void {
   job.container.replaceChildren(note, pre)
 }
 
+/** Below this a wide diagram's labels get too small to read; it scrolls instead. */
+const MIN_DIAGRAM_SCALE = 0.6
+
+/** Tell the stylesheet the diagram's natural width: it fits the column by shrinking,
+ *  but never past MIN_DIAGRAM_SCALE (see .smd-mermaid in article.css). */
+function sizeDiagram(container: HTMLElement): void {
+  const svg = container.querySelector<SVGSVGElement>(':scope > svg')
+  const natural = svg?.viewBox?.baseVal?.width || 0
+  if (!svg || !natural) return
+  svg.style.setProperty('--smd-diagram-width', `${Math.ceil(natural)}px`)
+  svg.style.setProperty('--smd-diagram-min', `${Math.ceil(natural * MIN_DIAGRAM_SCALE)}px`)
+}
+
 async function renderOne(mermaid: MermaidApi, job: MermaidJob, isStale: () => boolean): Promise<boolean> {
   const picked = await pickSource(mermaid, job.source)
   if (isStale() || !job.container.isConnected) return false
@@ -90,6 +103,7 @@ async function renderOne(mermaid: MermaidApi, job: MermaidJob, isStale: () => bo
     const { svg } = await mermaid.render(id, picked.source)
     if (isStale() || !job.container.isConnected) return false
     job.container.innerHTML = svg
+    sizeDiagram(job.container)
     job.container.setAttribute('role', 'img')
     job.container.setAttribute('aria-label', 'Diagram')
     return picked.fixed
