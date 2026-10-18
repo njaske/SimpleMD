@@ -3,7 +3,7 @@
 // CSS side imports) and DOMPurify needs a window, so tests call setupRenderEnv() and
 // then load the modules under test with a dynamic import().
 import { existsSync, statSync } from 'node:fs'
-import { registerHooks } from 'node:module'
+import * as nodeModule from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Window } from 'happy-dom'
@@ -99,6 +99,11 @@ function patchForPurify(window: Window): void {
 /** Install the module resolution hooks and happy-dom globals (idempotent). */
 export function setupRenderEnv(): Window {
   if (!installed) {
+    // A namespace import, so older Node gets this message instead of a link error.
+    const { registerHooks } = nodeModule
+    if (typeof registerHooks !== 'function') {
+      throw new Error(`The renderer tests need Node 22.15+ (module.registerHooks); this is Node ${process.version}.`)
+    }
     registerHooks({
       resolve(specifier, context, nextResolve) {
         if (specifier.endsWith('.css')) return { url: EMPTY_MODULE, shortCircuit: true }

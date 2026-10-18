@@ -11,12 +11,14 @@ import DOMPurify, { type Config, type DOMPurify as Purifier } from 'dompurify'
 const UNSAFE_STYLE = /position\s*:\s*(fixed|sticky)|z-index|inset|url\s*\(|@import|expression\s*\(|behavior/i
 
 // <style> would restyle the whole reader; forms and interactive elements are a
-// phishing surface; media and embeds fetch or run things. <input> is handled below.
+// phishing surface; media and embeds fetch or run things (SVG <image>/<feImage> and
+// MathML <mglyph> too: they'd load remote images past "Block remote images").
+// <input> is handled below.
 const FORBID_TAGS = [
   'style', 'form', 'button', 'textarea', 'select', 'option', 'optgroup', 'fieldset', 'label',
   'legend', 'datalist', 'output', 'meter', 'progress', 'dialog', 'video', 'audio', 'source',
   'track', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet', 'base', 'link', 'meta',
-  'template', 'slot', 'portal'
+  'template', 'slot', 'portal', 'image', 'feimage', 'mglyph'
 ]
 
 const CONFIG: Config = {
@@ -25,7 +27,8 @@ const CONFIG: Config = {
   ADD_TAGS: ['semantics', 'annotation'],
   ADD_ATTR: ['target', 'rel', 'encoding'],
   FORBID_TAGS,
-  FORBID_ATTR: ['autofocus', 'formaction', 'form', 'srcset', 'ping']
+  // `background` (tables, cells) is an image fetch.
+  FORBID_ATTR: ['autofocus', 'formaction', 'form', 'srcset', 'ping', 'background']
 }
 
 const TASK_LINE = /^\d{1,9}$/
@@ -48,6 +51,22 @@ function cleanInput(node: Element): void {
   else node.setAttribute('disabled', '')
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg'
+/** url(...) pointing anywhere but into the same document (fill="url(#grad)" is fine). */
+const EXTERNAL_URL = /url\s*\(\s*(?!['"]?\s*#)/i
+
+/** SVG references may only point inside the document: an external href or url() is
+ *  a fetch (and `<use>`-style references could pull in outside markup). Links keep
+ *  their href; DOMPurify already filters its protocol. */
+function cleanSvgRefs(node: Element): void {
+  const isLink = node.tagName.toLowerCase() === 'a'
+  for (const name of node.getAttributeNames()) {
+    const value = node.getAttribute(name) || ''
+    const isRef = name === 'href' || name === 'xlink:href'
+    if (isRef ? !isLink && !value.trim().startsWith('#') : EXTERNAL_URL.test(value)) node.removeAttribute(name)
+  }
+}
+
 let purifier: Purifier | null = null
 
 function getPurifier(): Purifier {
@@ -58,6 +77,7 @@ function getPurifier(): Purifier {
       cleanInput(node)
       return
     }
+    if (node.namespaceURI === SVG_NS) cleanSvgRefs(node)
     const style = node.getAttribute('style')
     if (style && UNSAFE_STYLE.test(style)) node.removeAttribute('style')
   })

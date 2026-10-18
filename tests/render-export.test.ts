@@ -31,6 +31,22 @@ function article(): HTMLElement {
 }
 
 describe('buildStandaloneHtml', () => {
+  it('turns forged image placeholders into text, never javascript: or file: links', () => {
+    // Arrange: what a hostile document can get through the sanitizer
+    const el = document.createElement('div')
+    el.innerHTML = renderMarkdown(
+      '<div class="smd-imgblocked" data-src="javascript:alert(1)">x</div>\n\n' +
+        '<span class="smd-imgchip smd-imgblocked" data-src="file:///C:/secret.png">y</span>'
+    ).html
+    // Act
+    const html = buildStandaloneHtml(el, { title: 't', theme: 'light' })
+    const clip = articleClipboardPayload(el).html
+    // Assert
+    for (const out of [html, clip]) {
+      assert.doesNotMatch(out, /javascript:|file:/i)
+    }
+  })
+
   it('produces one self-contained document with a strict CSP and no scripts', () => {
     // Act
     const html = buildStandaloneHtml(article(), { title: 'A <b>"report"</b> & more', theme: 'dark' })

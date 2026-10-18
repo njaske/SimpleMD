@@ -14,9 +14,14 @@ const HIGHLIGHT_CURRENT = 'smd-find-current'
 const MAX_MATCHES = 5000
 
 // Text that isn't part of the reading flow: MathML duplicates of formulas, the code
-// block tools, diagram SVG internals.
-const SKIP = '.katex-mathml, .smd-code-tools, .smd-mermaid, script, style, button'
-const BLOCKS = 'p, li, h1, h2, h3, h4, h5, h6, td, th, pre, dt, dd, figcaption, summary, blockquote, div'
+// block tools, diagram SVG internals. Checked per element (tag and class lookups, no
+// selector matching per text node), which keeps indexing a multi-MB article quick.
+const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'BUTTON', 'TEMPLATE'])
+const SKIP_CLASSES = ['katex-mathml', 'smd-code-tools', 'smd-mermaid']
+const BLOCK_TAGS = new Set([
+  'P', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TD', 'TH', 'PRE', 'DT', 'DD', 'FIGCAPTION', 'SUMMARY',
+  'BLOCKQUOTE', 'DIV', 'TABLE', 'TR', 'UL', 'OL', 'SECTION', 'DETAILS', 'FIGURE'
+])
 
 interface Segment {
   node: Text
@@ -30,25 +35,56 @@ export interface TextIndex {
   segments: Segment[]
 }
 
+function isSkipped(el: Element): boolean {
+  return SKIP_TAGS.has(el.tagName) || SKIP_CLASSES.some((name) => el.classList.contains(name))
+}
+
 /** Flatten the article's readable text for searching. */
 export function indexText(root: HTMLElement): TextIndex {
   const segments: Segment[] = []
-  let text = ''
-  let lastBlock: Element | null = null
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    const t = node as Text
-    const parent = t.parentElement
-    if (!parent || !t.data || parent.closest(SKIP)) continue
-    const block = parent.closest(BLOCKS)
-    if (block !== lastBlock && text) text += '\n'
-    lastBlock = block
-    const lower = t.data.toLowerCase()
-    // Rare characters change length when lower-cased; keep offsets aligned.
-    segments.push({ node: t, start: text.length })
-    text += lower.length === t.data.length ? lower : t.data
+  const parts: string[] = []
+  let length = 0
+  // A block boundary was crossed since the last text: the next text starts a new line.
+  let pendingBreak = false
+  const visit = (parent: Node): void => {
+    for (let node = parent.firstChild; node; node = node.nextSibling) {
+      if (node.nodeType === 3) {
+        const t = node as Text
+        if (!t.data) continue
+        if (pendingBreak && length) {
+          parts.push('\n')
+          length++
+        }
+        pendingBreak = false
+        const lower = t.data.toLowerCase()
+        // Rare characters change length when lower-cased; keep offsets aligned.
+        segments.push({ node: t, start: length })
+        parts.push(lower.length === t.data.length ? lower : t.data)
+        length += t.data.length
+      } else if (node.nodeType === 1 && !isSkipped(node as Element)) {
+        const block = BLOCK_TAGS.has((node as Element).tagName)
+        if (block) pendingBreak = true
+        visit(node)
+        if (block) pendingBreak = true
+      }
+    }
   }
-  return { text, segments }
+  visit(root)
+  return { text: parts.join(''), segments }
+}
+
+/** Index of the first item `accepts` takes, for items where acceptance only switches
+ *  from false to true once (ranges in document order vs. "at or below the viewport").
+ *  A binary search, so a find in a huge document measures a handful of ranges. */
+export function firstAccepted<T>(items: readonly T[], accepts: (item: T) => boolean): number {
+  let lo = 0
+  let hi = items.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (accepts(items[mid])) hi = mid
+    else lo = mid + 1
+  }
+  return lo < items.length ? lo : -1
 }
 
 /** Start offsets of every (non-overlapping) occurrence of `needle` in `haystack`. */
@@ -90,6 +126,9 @@ export class FindState {
   query = ''
   private ranges: Range[] = []
   private current = -1
+  // The article's text index, rebuilt only after its text changed (a repaint, images
+  // loading in): typing a query re-searches the same text many times.
+  private index: { root: HTMLElement; value: TextIndex; observer: MutationObserver | null } | null = null
 
   get result(): FindResult {
     return { index: this.current + 1, total: this.ranges.length }
@@ -104,17 +143,19 @@ export class FindState {
   search(root: HTMLElement, query: string, isAtOrBelow: (range: Range) => boolean): void {
     this.query = query
     const needle = query.toLowerCase()
-    const index = indexText(root)
+    const index = this.textIndex(root)
     this.ranges = index.segments.length
       ? findOffsets(index.text, needle).map((start) => toRange(index, start, needle.length))
       : []
-    const first = this.ranges.findIndex(isAtOrBelow)
+    const first = firstAccepted(this.ranges, isAtOrBelow)
     this.current = this.ranges.length ? Math.max(0, first) : -1
     this.paint()
   }
 
   /** Re-run the same query after a repaint, keeping the position when possible. */
   refresh(root: HTMLElement): void {
+    // The repaint just happened: the observer hasn't reported it yet.
+    this.invalidate()
     const keep = this.current
     const query = this.query
     this.search(root, query, () => true)
@@ -129,14 +170,32 @@ export class FindState {
     this.paint()
   }
 
+  /** Forget the cached text index (the article was replaced or rewritten). */
+  invalidate(): void {
+    this.index?.observer?.disconnect()
+    this.index = null
+  }
+
   clear(): void {
     this.query = ''
     this.ranges = []
     this.current = -1
+    this.invalidate()
     if (highlightsSupported()) {
       CSS.highlights.delete(HIGHLIGHT_ALL)
       CSS.highlights.delete(HIGHLIGHT_CURRENT)
     }
+  }
+
+  private textIndex(root: HTMLElement): TextIndex {
+    if (this.index?.root === root) return this.index.value
+    this.invalidate()
+    const value = indexText(root)
+    const observer = typeof MutationObserver === 'function' ? new MutationObserver(() => this.invalidate()) : null
+    observer?.observe(root, { childList: true, subtree: true, characterData: true })
+    // Without an observer there's no way to know the text is still current: don't cache.
+    if (observer) this.index = { root, value, observer }
+    return value
   }
 
   private paint(): void {

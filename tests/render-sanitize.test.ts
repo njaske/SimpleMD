@@ -5,6 +5,7 @@ import { parseHtml, setupRenderEnv } from './render-env.ts'
 setupRenderEnv()
 const { renderMarkdown } = await import('../src/renderer/src/lib/markdown.ts')
 const { sanitizeHtml } = await import('../src/renderer/src/lib/markdown/sanitize.ts')
+const { labelTaskBoxes } = await import('../src/renderer/src/lib/reader/tasks.ts')
 
 function render(md: string): HTMLElement {
   return parseHtml(renderMarkdown(md).html)
@@ -68,9 +69,45 @@ describe('sanitizer', () => {
     assert.deepEqual(styles, [null, null, 'color:red'])
   })
 
+  it('drops every remote fetch outside <img>: SVG image/feImage, mglyph, background, external SVG refs', () => {
+    // Arrange
+    const md = [
+      '<svg><image href="https://t.example/a.png"/><image xlink:href="https://t.example/b.png"/></svg>',
+      '<svg><filter id="f"><feImage href="https://t.example/c.png"/></filter></svg>',
+      '<math><mglyph src="https://t.example/d.png"></mglyph></math>',
+      '<table background="https://t.example/e.png"><tr><td background="https://t.example/f.png">x</td></tr></table>',
+      '<svg><rect fill="url(https://t.example/g.svg#p)" width="4" height="4"/><rect fill="url(#ok)" width="4" height="4"/></svg>',
+      '<svg><linearGradient id="g2" href="https://t.example/h.svg#x"></linearGradient><a href="https://ok.example">ok</a></svg>'
+    ].join('\n\n')
+    // Act
+    const html = renderMarkdown(md).html
+    const doc = parseHtml(html)
+    // Assert
+    assert.doesNotMatch(html, /t\.example/)
+    assert.equal(doc.querySelectorAll('image, feImage, feimage, mglyph, [background]').length, 0)
+    assert.equal(doc.querySelectorAll('rect')[1]?.getAttribute('fill'), 'url(#ok)')
+    assert.match(html, /href="https:\/\/ok\.example"/)
+  })
+
   it('keeps what documents legitimately need: details, svg icons, footnote ids', () => {
     const doc = render('> [!faq]- Q\n> A\n\nText[^1]\n\n[^1]: Note')
     assert.equal(doc.querySelectorAll('details summary svg path').length > 0, true)
     assert.ok(doc.querySelector('#footnote-1'))
+  })
+})
+
+describe('task checkbox names', () => {
+  it('labels each box with its own item text, not its nested items', () => {
+    // Arrange
+    const tpl = document.createElement('template')
+    tpl.innerHTML = renderMarkdown('- [ ] Ship the **beta**\n  - [x] Write notes\n- [ ] ' + 'long '.repeat(40)).html
+    // Act
+    labelTaskBoxes(tpl.content)
+    // Assert
+    const labels = Array.from(tpl.content.querySelectorAll('input'), (b) => b.getAttribute('aria-label') ?? '')
+    assert.equal(labels[0], 'Ship the beta')
+    assert.equal(labels[1], 'Write notes')
+    assert.equal(labels[2].length, 120)
+    assert.ok(labels[2].endsWith('…'))
   })
 })

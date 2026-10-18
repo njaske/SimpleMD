@@ -1,6 +1,7 @@
 // Export and copy of the rendered document.
 import type { ResolvedTheme } from '@shared/types'
 import { escapeHtml } from '@/lib/markdown'
+import { exportableSrc } from './images'
 import { clipboardStyles, DEFAULT_METRICS, PALETTES, standaloneCss, type ReadingMetrics } from './exportStyles'
 
 export interface StandaloneOptions {
@@ -38,21 +39,23 @@ function link(href: string, text: string): HTMLAnchorElement {
   return a
 }
 
-/** Blocked or not-yet-loaded images become links / their alt text. */
+/** Blocked or not-yet-loaded images become links (web URLs only) or their alt text. */
 function settleImages(root: HTMLElement): void {
   root.querySelectorAll<HTMLElement>('.smd-imgblocked').forEach((card) => {
-    const src = card.dataset.src || ''
+    const src = exportableSrc(card)
     const figure = card.closest('figure')
     const alt = card.classList.contains('smd-imgchip') ? card.textContent || '' : figure?.querySelector('figcaption')?.textContent || ''
-    const replacement = link(src, alt || src)
+    const replacement = src ? link(src, alt || src) : textSpan(alt)
     if (figure && !card.classList.contains('smd-imgchip')) figure.replaceWith(replacement)
     else card.replaceWith(replacement)
   })
-  root.querySelectorAll<HTMLElement>('.smd-imgph').forEach((ph) => {
-    const span = document.createElement('span')
-    span.textContent = ph.textContent || ''
-    ph.replaceWith(span)
-  })
+  root.querySelectorAll<HTMLElement>('.smd-imgph').forEach((ph) => ph.replaceWith(textSpan(ph.textContent || '')))
+}
+
+function textSpan(text: string): HTMLSpanElement {
+  const span = document.createElement('span')
+  span.textContent = text
+  return span
 }
 
 /** KaTeX keeps a MathML copy of every formula; exports keep just that (no fonts or CSS). */
@@ -78,8 +81,9 @@ function cleanAppMarkup(root: HTMLElement): void {
 /** A detached copy of the article without app chrome, scripts or app attributes. */
 function exportClone(article: HTMLElement): HTMLElement {
   const clone = article.cloneNode(true) as HTMLElement
-  stripUnsafe(clone)
   settleImages(clone)
+  // After settleImages: whatever it made goes through the same filter.
+  stripUnsafe(clone)
   mathToMathml(clone)
   cleanAppMarkup(clone)
   return clone

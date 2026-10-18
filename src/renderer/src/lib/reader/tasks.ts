@@ -26,3 +26,26 @@ export function taskLines(md: string): number[] {
   const fenced = scanFences(lines).inside
   return lines.flatMap((text, i) => (!fenced[i] && TASK.test(text) ? [i] : []))
 }
+
+const TASK_LABEL_MAX = 120
+
+/** Text of a list item without its nested lists: what its checkbox is about. */
+function ownText(node: Node): string {
+  let text = ''
+  for (let child = node.firstChild; child; child = child.nextSibling) {
+    if (child.nodeType === 3) text += child.textContent || ''
+    else if (child.nodeType === 1 && !/^(UL|OL|INPUT)$/.test((child as Element).tagName)) text += ownText(child)
+  }
+  return text
+}
+
+/** Give every task checkbox under `root` an accessible name (its item's text), so a
+ *  screen reader says "Ship the beta, checkbox, not checked" rather than just "checkbox". */
+export function labelTaskBoxes(root: ParentNode): void {
+  root.querySelectorAll('input.smd-task').forEach((box) => {
+    const item = box.closest('li')
+    const text = item ? ownText(item).replace(/\s+/g, ' ').trim() : ''
+    if (!text) return
+    box.setAttribute('aria-label', text.length > TASK_LABEL_MAX ? text.slice(0, TASK_LABEL_MAX - 1) + '…' : text)
+  })
+}

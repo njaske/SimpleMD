@@ -104,6 +104,10 @@
 .smd-article input.smd-task {
   appearance: none;
   -webkit-appearance: none;
+  /* Inputs don't inherit the font: without this em and lh resolve against the UA's
+     13.33px control font and the box comes out small and too high. */
+  font: inherit;
+  line-height: inherit;
   width: 1.05em;
   height: 1.05em;
   margin: 0;
@@ -232,15 +236,16 @@
 .smd-article .smd-copy:active { transform: translateY(0.5px); }
 .smd-article .smd-copy.is-copied { color: var(--tip, #2b7a38); }
 
-/* Syntax colours (reader and editor share the --tok-* tokens). */
-.hljs-keyword, .hljs-built_in, .hljs-literal, .hljs-type, .hljs-selector-tag, .hljs-tag, .hljs-name { color: var(--tok-kw); }
+/* Syntax colours (reader and editor share the --tok-* tokens; the fallbacks keep code
+   readable with any palette that lacks them). */
+.hljs-keyword, .hljs-built_in, .hljs-literal, .hljs-type, .hljs-selector-tag, .hljs-tag, .hljs-name { color: var(--tok-kw, var(--fg, #1f1e1c)); }
 .hljs-keyword, .hljs-selector-tag { font-weight: 500; }
-.hljs-string, .hljs-regexp, .hljs-meta .hljs-string, .hljs-template-tag, .hljs-selector-attr, .hljs-selector-pseudo, .hljs-addition { color: var(--tok-str); }
-.hljs-comment, .hljs-quote { color: var(--tok-com); font-style: italic; }
-.hljs-number, .hljs-symbol, .hljs-bullet { color: var(--tok-num); }
-.hljs-title, .hljs-title.function_, .hljs-section, .hljs-selector-id, .hljs-selector-class { color: var(--tok-fn); }
-.hljs-attr, .hljs-attribute, .hljs-property, .hljs-params, .hljs-variable { color: var(--fg-muted); }
-.hljs-punctuation, .hljs-operator, .hljs-meta { color: var(--tok-punc); }
+.hljs-string, .hljs-regexp, .hljs-meta .hljs-string, .hljs-template-tag, .hljs-selector-attr, .hljs-selector-pseudo, .hljs-addition { color: var(--tok-str, var(--tip, #2b7a38)); }
+.hljs-comment, .hljs-quote { color: var(--tok-com, var(--fg-faint, #76716a)); font-style: italic; }
+.hljs-number, .hljs-symbol, .hljs-bullet { color: var(--tok-num, var(--warning, #9a6700)); }
+.hljs-title, .hljs-title.function_, .hljs-section, .hljs-selector-id, .hljs-selector-class { color: var(--tok-fn, var(--important, #6f42c1)); }
+.hljs-attr, .hljs-attribute, .hljs-property, .hljs-params, .hljs-variable { color: var(--fg-muted, #5c5852); }
+.hljs-punctuation, .hljs-operator, .hljs-meta { color: var(--tok-punc, var(--fg-muted, #5c5852)); }
 .hljs-deletion { color: var(--caution, #be3329); }
 .hljs-emphasis { font-style: italic; }
 .hljs-strong { font-weight: 700; }
@@ -452,7 +457,10 @@
   font-size: 11.5px;
   font-weight: 500;
   color: var(--fg-muted, #5c5852);
-  background: var(--sunken);
+  /* A tint of the text colour plus a hairline, so the pill stands off the card in
+     every theme (the card itself is a wash of --sunken). */
+  background: color-mix(in srgb, var(--fg, #1f1e1c) 6%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hairline) 80%, transparent);
   border-radius: 99px;
   white-space: nowrap;
 }
@@ -502,8 +510,10 @@
 /* ---- Reader states: changes, find, landing flash ------------------------------- */
 
 /* Changed blocks: a wash with a bar on the left, drawn with box-shadows so blocks
-   that scroll sideways (tables, code, math) don't clip it. Opaque mixes keep the
-   layered shadows from adding up. */
+   that scroll sideways (tables, code, math) don't clip it. The wash must be opaque:
+   the shadows overlap, and translucent layers would add up and let the bar show
+   through. So it's mixed from --changed over --bg rather than taken from the
+   translucent --changed-soft (which CSS can't flatten onto the background). */
 .smd-article .smd-changed {
   --wash: color-mix(in srgb, var(--changed, #c98a12) 15%, var(--bg, #fefdfb));
   --reach: 0.9em;

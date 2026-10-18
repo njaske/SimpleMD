@@ -15,6 +15,7 @@ import { FindState, type FindResult } from './find'
 import { activeHeading, assignHeadingIds, headingSlugs, type HeadingSlugs } from './headings'
 import { enhanceImages, isLoadImagesControl, loadBlocked } from './images'
 import { renderMermaid, type MermaidJob } from './mermaid'
+import { labelTaskBoxes } from './tasks'
 
 export type { LineRange, FindResult }
 
@@ -34,6 +35,8 @@ const STICK_TO_END_MS = 2000
 const FLASH_MS = 1200
 /** Most work one idle slice of a progressive render may do. */
 const SLICE_MS = 40
+/** Find-as-you-type waits this long after a keystroke in huge documents. */
+const FIND_DELAY_LARGE_MS = 120
 
 /** What to render. */
 export interface ReaderDoc {
@@ -322,6 +325,12 @@ export class ReaderController {
     this.findState.clear()
   }
 
+  /** How long the find bar should wait after a keystroke before searching: nothing for
+   *  ordinary notes, a beat for huge ones so typing a word costs one search, not five. */
+  findDelay(): number {
+    return this.doc.md.length > LARGE_DOC_CHARS ? FIND_DELAY_LARGE_MS : 0
+  }
+
   /** Find results changed on their own (the document repainted under an open find bar). */
   onFindResult(cb: (result: FindResult) => void): () => void {
     this.findSubs.add(cb)
@@ -337,6 +346,7 @@ export class ReaderController {
     this.allowRemoteFor = this.doc.id
     const article = this.getArticle()
     if (article) loadBlocked(article)
+    this.findState.invalidate()
     this.blockedImages = 0
     this.reportInfo()
   }
@@ -412,6 +422,7 @@ export class ReaderController {
     // Pull mermaid blocks out before decorating so they get no copy button.
     const jobs = extractDiagrams(frag)
     decorateCodeBlocks(frag)
+    labelTaskBoxes(frag)
     article.appendChild(frag)
     for (const fix of fixes) if (!this.fixes.includes(fix)) this.fixes.push(fix)
     // One diagram batch at a time: mermaid's renderer is global and not re-entrant.

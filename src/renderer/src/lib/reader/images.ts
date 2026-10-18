@@ -15,9 +15,11 @@ export interface ImageContext {
 
 export const LOAD_IMAGES_CLASS = 'smd-imgblocked-load'
 
-// The "load images" controls we created (documents can copy our class names, so a
-// click only counts on these).
+// The "load images" controls and blocked placeholders we created, with the image each
+// placeholder holds back. Documents can copy our class names and data-* attributes,
+// so a click only counts on these and only these placeholders are ever loaded.
 const loadControls = new WeakSet<Element>()
+const blockedSrc = new WeakMap<Element, string>()
 
 /** True when `target` is (inside) one of our "load images" controls. */
 export function isLoadImagesControl(target: Element): boolean {
@@ -26,6 +28,20 @@ export function isLoadImagesControl(target: Element): boolean {
 }
 
 const REMOTE = /^(?:https?:)?\/\//i
+/** Protocol-relative URLs would resolve against file:// in the packaged app (a UNC
+ *  path on Windows); they mean the web, so pin them to https. */
+function normalizeRemote(src: string): string {
+  return src.startsWith('//') ? 'https:' + src : src
+}
+
+/** The image an export may link a blocked placeholder to. Copies lose our WeakMap, so
+ *  only the attribute is left: keep it to plain web URLs (a forged card can't smuggle
+ *  a javascript: or file: link into the output). */
+export function exportableSrc(el: Element): string | null {
+  const src = (el.getAttribute('data-src') || '').trim()
+  return /^https?:\/\//i.test(src) ? src : null
+}
+
 const INLINE = /^data:image\//i
 
 function makeImg(src: string, alt: string, title: string): HTMLImageElement {
@@ -55,6 +71,7 @@ function blockedCard(src: string): HTMLElement {
   const card = document.createElement('div')
   card.className = 'smd-imgblocked'
   card.dataset.src = src
+  blockedSrc.set(card, src)
   const icon = document.createElement('span')
   icon.className = 'smd-imgblocked-icon'
   icon.innerHTML = IMAGE_OFF_ICON
@@ -126,6 +143,7 @@ function inlineImage(img: ImageInfo, ctx: ImageContext, remote: boolean): { el: 
   chip.textContent = img.alt || (remote ? hostOf(img.src) : img.src) || 'image'
   if (remote) {
     chip.dataset.src = img.src
+    blockedSrc.set(chip, img.src)
     chip.title = 'Remote image blocked. Click to load images'
     chip.setAttribute('role', 'button')
     chip.tabIndex = 0
@@ -164,7 +182,8 @@ function figureImage(img: ImageInfo, ctx: ImageContext, remote: boolean): { el: 
 export function enhanceImages(root: ParentNode, ctx: ImageContext): number {
   let blocked = 0
   root.querySelectorAll('img').forEach((el) => {
-    const img = { src: el.getAttribute('src') || '', alt: el.getAttribute('alt') || '', title: el.getAttribute('title') || '' }
+    const raw = el.getAttribute('src') || ''
+    const img = { src: normalizeRemote(raw.trim()), alt: el.getAttribute('alt') || '', title: el.getAttribute('title') || '' }
     const remote = REMOTE.test(img.src)
     const out = isInline(el) ? inlineImage(img, ctx, remote) : figureImage(img, ctx, remote)
     if (out.blocked) blocked++
@@ -173,10 +192,11 @@ export function enhanceImages(root: ParentNode, ctx: ImageContext): number {
   return blocked
 }
 
-/** Swap every blocked placeholder under `root` for the real image. */
+/** Swap every blocked placeholder we made under `root` for the real image. */
 export function loadBlocked(root: ParentNode): void {
   root.querySelectorAll<HTMLElement>('.smd-imgblocked').forEach((card) => {
-    const src = card.dataset.src || ''
+    const src = blockedSrc.get(card)
+    if (!src) return
     const figure = card.closest('figure.smd-img')
     const alt = card.classList.contains('smd-imgchip')
       ? card.textContent || ''

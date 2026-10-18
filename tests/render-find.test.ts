@@ -3,9 +3,11 @@ import { describe, it } from 'node:test'
 import { setupRenderEnv } from './render-env.ts'
 
 setupRenderEnv()
-const { findOffsets, indexText } = await import('../src/renderer/src/lib/reader/find.ts')
+const { findOffsets, indexText, firstAccepted } = await import('../src/renderer/src/lib/reader/find.ts')
 const { markChanges, unmarkChanges } = await import('../src/renderer/src/lib/reader/changes.ts')
-const { enhanceImages, loadBlocked, isLoadImagesControl } = await import('../src/renderer/src/lib/reader/images.ts')
+const { enhanceImages, loadBlocked, isLoadImagesControl, exportableSrc } = await import(
+  '../src/renderer/src/lib/reader/images.ts'
+)
 
 function article(html: string): HTMLElement {
   const el = document.createElement('div')
@@ -32,6 +34,21 @@ describe('find helpers', () => {
     assert.equal(index.text, 'hello world\nnext')
     assert.deepEqual(findOffsets(index.text, 'world'), [6])
     assert.deepEqual(findOffsets(index.text, 'ldnext'), [])
+  })
+})
+
+describe('first match below the viewport', () => {
+  it('binary-searches the first accepted item', () => {
+    const tops = [-300, -10, 0, 5, 400]
+    assert.equal(firstAccepted(tops, (t) => t >= 0), 2)
+    assert.equal(firstAccepted(tops, (t) => t >= -1000), 0)
+    assert.equal(firstAccepted(tops, (t) => t > 1000), -1)
+    assert.equal(firstAccepted([], () => true), -1)
+  })
+
+  it('keeps block breaks between nested blocks and none at the end', () => {
+    const index = indexText(article('<ul><li>one<ul><li>two</li></ul></li></ul><table><tr><td>a</td><td>b</td></tr></table>'))
+    assert.equal(index.text, 'one\ntwo\na\nb')
   })
 })
 
@@ -77,6 +94,28 @@ describe('images', () => {
       'https://x.example/a.png',
       'https://x.example/b.svg'
     ])
+  })
+
+  it('never loads placeholders the document forged, and exports keep only web links', () => {
+    // Arrange: a sanitized document can carry our class names and data-* attributes
+    const el = article(
+      '<div class="smd-imgblocked" data-src="file:///C:/secret.png">a</div>' +
+        '<span class="smd-imgchip smd-imgblocked" data-src="javascript:alert(1)">b</span>'
+    )
+    // Act
+    loadBlocked(el)
+    // Assert
+    assert.equal(el.querySelectorAll('img').length, 0)
+    const [card, chip] = Array.from(el.querySelectorAll('.smd-imgblocked'))
+    assert.equal(exportableSrc(card), null)
+    assert.equal(exportableSrc(chip), null)
+  })
+
+  it('pins protocol-relative images to https', () => {
+    const tpl = document.createElement('template')
+    tpl.innerHTML = '<p><img src="//cdn.example/a.png" alt="A"></p>'
+    enhanceImages(tpl.content, ctx(false))
+    assert.equal(tpl.content.querySelector('img')?.getAttribute('src'), 'https://cdn.example/a.png')
   })
 
   it('ignores look-alike controls written by the document', () => {

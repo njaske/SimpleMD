@@ -97,6 +97,19 @@ describe('task checkboxes', () => {
     assert.ok(boxes.every((b) => !b.hasAttribute('disabled') && b.classList.contains('smd-task')))
   })
 
+  it('maps nested tasks under an unchecked parent (bullets, stars, numbers, callouts)', () => {
+    const lines = (md: string): Array<string | null> =>
+      Array.from(parseHtml(renderMarkdown(md).html).querySelectorAll('input'), (b) => b.getAttribute('data-task-line'))
+    const items = (md: string): Array<string | null> =>
+      Array.from(parseHtml(renderMarkdown(md).html).querySelectorAll('li'), (li) => li.getAttribute('data-line'))
+    assert.deepEqual(lines('- [ ] a\n  - [ ] b\n- [ ] c'), ['0', '1', '2'])
+    assert.deepEqual(items('- [ ] a\n  - [ ] b\n- [ ] c'), ['0', '1', '2'])
+    assert.deepEqual(lines('* [ ] a\n  * [ ] b\n    * [ ] c'), ['0', '1', '2'])
+    assert.deepEqual(lines('1. [ ] c\n   1. [ ] d\n2. [ ] e'), ['0', '1', '2'])
+    assert.deepEqual(lines('> [!TODO]\n> - [ ] p\n>   - [ ] q'), ['1', '2'])
+    assert.deepEqual(lines('- [ ] p\n\n  Body text.\n\n  - [ ] r'), ['0', '4'])
+  })
+
   it('works in loose lists too', () => {
     const boxes = parseHtml(renderMarkdown('- [ ] a\n\n- [x] b').html).querySelectorAll('input')
     assert.deepEqual(Array.from(boxes, (b) => b.getAttribute('data-task-line')), ['0', '2'])

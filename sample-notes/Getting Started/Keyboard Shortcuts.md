@@ -42,7 +42,7 @@ On macOS, read `Ctrl` as `Cmd` in every row below.
 | Focus mode | `Ctrl` + `.` |
 | Toggle light and dark | `Ctrl` + `Shift` + `D` |
 | Bigger / smaller / reset text | `Ctrl` + `=` / `-` / `0` |
-| Next change | `Alt` + `N` |
+| Next change / dismiss changes | `Alt` + `N` / `Esc` in the change bar |
 | Settings | `Ctrl` + `,` |
 | Keyboard shortcuts | `Ctrl` + `/` |
 

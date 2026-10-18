@@ -89,7 +89,9 @@ function walk(tokens: readonly Token[], frame: Frame): void {
   const starts = lineStarts(frame.content)
   let cursor = 0
   for (const token of tokens) {
-    if (isFootnotesSection(token) || token.type === 'space') continue
+    // A task's checkbox token keeps its "[ ] " raw, but item.text no longer has it: looking
+    // for it would land on a nested task's box and skip everything before that.
+    if (isFootnotesSection(token) || token.type === 'space' || token.type === 'checkbox') continue
     const found = locate(frame.content, token.raw, cursor)
     if (!found) continue
     cursor = found.next

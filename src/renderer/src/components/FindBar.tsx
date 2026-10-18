@@ -33,15 +33,31 @@ export default function FindBar({ reader, initialQuery = '', onClose }: FindBarP
   const [query, setQuery] = useState(initialQuery)
   const [result, setResult] = useState<FindResult>(NONE)
   const input = useRef<HTMLInputElement>(null)
+  // A search-as-you-type still waiting for typing to pause (huge documents only).
+  const pending = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     input.current?.focus()
     input.current?.select()
   }, [])
 
+  const cancelPending = (): void => {
+    if (pending.current) clearTimeout(pending.current)
+    pending.current = null
+  }
+
   // Search as you type; the reader keeps the first match at or below the viewport.
   useEffect(() => {
-    setResult(reader.find(query))
+    const delay = query ? reader.findDelay() : 0
+    if (!delay) {
+      setResult(reader.find(query))
+      return
+    }
+    pending.current = setTimeout(() => {
+      pending.current = null
+      setResult(reader.find(query))
+    }, delay)
+    return cancelPending
   }, [reader, query])
 
   // The document can repaint under the bar (live reload); keep the count honest, and
@@ -55,13 +71,19 @@ export default function FindBar({ reader, initialQuery = '', onClose }: FindBarP
   }, [reader])
 
   const step = (backwards: boolean): void => {
-    if (query) setResult(reader.find(query, { backwards }))
+    // A search still waiting runs now (find() searches when the query is new), so
+    // Enter right after typing lands on the first match instead of skipping it.
+    const searchFirst = pending.current !== null
+    cancelPending()
+    if (query) setResult(reader.find(query, searchFirst ? {} : { backwards }))
     input.current?.focus()
   }
 
-  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
+  // On the whole bar, so Esc and Enter also work while a button has focus.
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
     const mod = e.ctrlKey || e.metaKey
-    if (e.key === 'Enter' || e.key === 'F3') {
+    const onButton = e.target instanceof HTMLButtonElement
+    if ((e.key === 'Enter' && !onButton) || e.key === 'F3') {
       e.preventDefault()
       step(e.shiftKey)
     } else if (e.key === 'Escape') {
@@ -71,6 +93,7 @@ export default function FindBar({ reader, initialQuery = '', onClose }: FindBarP
     } else if (mod && e.key.toLowerCase() === 'f') {
       // Find again while open: just re-select the query.
       e.preventDefault()
+      input.current?.focus()
       input.current?.select()
     } else if (mod && e.key.toLowerCase() === 'g') {
       e.preventDefault()
@@ -82,7 +105,7 @@ export default function FindBar({ reader, initialQuery = '', onClose }: FindBarP
   const empty = !!query && !result.total
 
   return (
-    <div className="smd-findbar smd-pop" role="search" aria-label="Find in document">
+    <div className="smd-findbar smd-pop" role="search" aria-label="Find in document" onKeyDown={onKeyDown}>
       <div className={'smd-findbar-field' + (empty ? ' is-empty' : '')}>
         <svg className="smd-findbar-glass" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
           strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
@@ -99,7 +122,6 @@ export default function FindBar({ reader, initialQuery = '', onClose }: FindBarP
           spellCheck={false}
           autoComplete="off"
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={onKeyDown}
         />
         <span className="smd-findbar-count" aria-live="polite">
           {label}
