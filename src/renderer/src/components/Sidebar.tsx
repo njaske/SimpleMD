@@ -1,133 +1,131 @@
-import { memo, type MouseEvent as ReactMouseEvent } from 'react'
-import type { Activity } from '@shared/types'
-import type { FolderItem, NamedFileRef } from '@/state/viewmodel'
+import { memo } from 'react'
+import type { Activity, ResolvedTheme } from '@shared/types'
+import type { NamedFileRef } from '@/state/viewmodel'
 import type { SearchResult } from '@/lib/document'
-import { FilePlusIcon, FolderPlusIcon } from '@/lib/icons'
-import FileTree from './FileTree'
+import { AppMark, ContrastIcon, GearIcon, KeyboardIcon, PlusIcon, SearchIcon } from '@/lib/icons'
+import FileTree, { type FileTreeProps } from './FileTree'
 import SearchPanel from './SearchPanel'
 import PinnedPanel from './PinnedPanel'
+import Segmented from './Segmented'
 
-interface Props {
+export interface SidebarProps {
   activity: Activity
-  hasFolder: boolean
-  onOpenFolder: () => void
-  onOpenFiles: () => void
-  folders: FolderItem[]
-  onToggleFolder: (id: string) => void
-  onOpenFile: (id: string) => void
-  onOpenAll: (id: string) => void
-  onPinFile: (id: string) => void
-  onFileContext: (id: string, e: ReactMouseEvent) => void
-  onFolderContext: (id: string, e: ReactMouseEvent) => void
+  overlay: boolean
+  workspaceName: string
+  resolvedTheme: ResolvedTheme
+  hint: (shortcut: string) => string
+  onActivity: (a: Activity) => void
+  onNewDocument: () => void
+  onQuickOpen: () => void
+  onSettings: () => void
+  onToggleTheme: () => void
+  onShortcuts: () => void
+  tree: FileTreeProps
   searchQuery: string
   searchResult: SearchResult
   onSearchInput: (value: string) => void
-  onOpenGroup: (id: string) => void
   onGotoMatch: (id: string, line: number, col: number, len: number) => void
   pinned: NamedFileRef[]
   recent: NamedFileRef[]
   onUnpin: (id: string) => void
+  onForgetRecent: (id: string) => void
+  onClearRecents: () => void
 }
 
-const TITLES: Record<Activity, string> = {
-  files: 'Explorer',
-  search: 'Search',
-  pinned: 'Pinned & Recent'
-}
+const PANELS: { value: Activity; label: string }[] = [
+  { value: 'files', label: 'Files' },
+  { value: 'search', label: 'Search' },
+  { value: 'pinned', label: 'Pinned' }
+]
 
-function Sidebar(props: Props) {
-  const { activity } = props
+function Sidebar(p: SidebarProps) {
+  const themeLabel = p.resolvedTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'
   return (
-    <div
-      className="smd-sidebar"
-      style={{
-        width: 256,
-        flex: 'none',
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'var(--bg-elev)',
-        borderRight: '1px solid var(--border)',
-        minHeight: 0
-      }}
-    >
-      <div
-        style={{
-          height: 40,
-          flex: 'none',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 8px 0 14px',
-          borderBottom: '1px solid var(--border)'
-        }}
-      >
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: '.09em',
-            textTransform: 'uppercase',
-            color: 'var(--fg-muted)'
-          }}
+    <aside className={'smd-sidebar' + (p.overlay ? ' smd-sidebar--overlay' : '')} aria-label="Sidebar">
+      <div className="smd-side-head smd-drag">
+        <div className="smd-brand">
+          <AppMark size={18} />
+          <span className="smd-brand-name">SimpleMD</span>
+        </div>
+        <button
+          type="button"
+          className="smd-iconbtn"
+          onClick={p.onNewDocument}
+          aria-label="New document"
+          title={`New document (${p.hint('Mod+N')})`}
         >
-          {TITLES[activity]}
-        </span>
-        {activity === 'files' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <button
-              className="smd-sqbtn"
-              onClick={props.onOpenFiles}
-              aria-label="Open files"
-              title="Open file(s)"
-              style={{ width: 28, height: 26 }}
-            >
-              <FilePlusIcon size={15} />
-            </button>
-            <button
-              className="smd-ghostbtn smd-ghostbtn--sm"
-              onClick={props.onOpenFolder}
-              aria-label="Open a folder"
-              title="Open a folder"
-            >
-              <FolderPlusIcon size={14} />
-              Open
-            </button>
-          </div>
+          <PlusIcon size={17} />
+        </button>
+        <button
+          type="button"
+          className="smd-iconbtn"
+          onClick={p.onQuickOpen}
+          aria-label="Quick open"
+          title={`Quick open (${p.hint('Mod+P')})`}
+        >
+          <SearchIcon size={16} />
+        </button>
+      </div>
+      <div className="smd-side-switch">
+        <Segmented label="Sidebar panel" block value={p.activity} onChange={p.onActivity} options={PANELS} />
+      </div>
+
+      <div className="smd-side-body">
+        {p.activity === 'files' && <FileTree {...p.tree} />}
+        {p.activity === 'search' && (
+          <SearchPanel
+            query={p.searchQuery}
+            result={p.searchResult}
+            onInput={p.onSearchInput}
+            onOpenGroup={p.tree.onOpenFile}
+            onGotoMatch={p.onGotoMatch}
+          />
+        )}
+        {p.activity === 'pinned' && (
+          <PinnedPanel
+            pinned={p.pinned}
+            recent={p.recent}
+            onOpen={p.tree.onOpenFile}
+            onUnpin={p.onUnpin}
+            onForgetRecent={p.onForgetRecent}
+            onClearRecents={p.onClearRecents}
+          />
         )}
       </div>
 
-      {activity === 'files' && (
-        <FileTree
-          folders={props.folders}
-          hasFolder={props.hasFolder}
-          onToggleFolder={props.onToggleFolder}
-          onOpenFile={props.onOpenFile}
-          onOpenAll={props.onOpenAll}
-          onPinFile={props.onPinFile}
-          onOpenFolder={props.onOpenFolder}
-          onOpenFiles={props.onOpenFiles}
-          onFileContext={props.onFileContext}
-          onFolderContext={props.onFolderContext}
-        />
-      )}
-      {activity === 'search' && (
-        <SearchPanel
-          query={props.searchQuery}
-          result={props.searchResult}
-          onInput={props.onSearchInput}
-          onOpenGroup={props.onOpenGroup}
-          onGotoMatch={props.onGotoMatch}
-        />
-      )}
-      {activity === 'pinned' && (
-        <PinnedPanel
-          pinned={props.pinned}
-          recent={props.recent}
-          onOpen={props.onOpenFile}
-          onUnpin={props.onUnpin}
-        />
-      )}
-    </div>
+      <div className="smd-side-foot">
+        <button
+          type="button"
+          className="smd-iconbtn"
+          onClick={p.onSettings}
+          aria-label="Settings"
+          title={`Settings (${p.hint('Mod+,')})`}
+        >
+          <GearIcon size={16} />
+        </button>
+        <button
+          type="button"
+          className="smd-iconbtn"
+          onClick={p.onToggleTheme}
+          aria-label={themeLabel}
+          title={`${themeLabel} (${p.hint('Mod+Shift+D')})`}
+        >
+          <ContrastIcon size={16} />
+        </button>
+        <button
+          type="button"
+          className="smd-iconbtn"
+          onClick={p.onShortcuts}
+          aria-label="Keyboard shortcuts"
+          title={`Keyboard shortcuts (${p.hint('Mod+/')})`}
+        >
+          <KeyboardIcon size={17} />
+        </button>
+        <span className="smd-side-foot-meta" title={p.workspaceName}>
+          {p.workspaceName}
+        </span>
+      </div>
+    </aside>
   )
 }
 

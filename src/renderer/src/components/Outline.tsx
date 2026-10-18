@@ -1,69 +1,55 @@
+import { memo, useEffect, useRef } from 'react'
 import type { OutlineItem } from '@/state/viewmodel'
 
 interface Props {
   outline: OutlineItem[]
+  /** Slug of the section at the top of the reader (scroll spy), if known. */
+  activeSlug: string | null
   onJump: (slug: string) => void
 }
 
-export default function Outline({ outline, onJump }: Props) {
+// "On this page": a quiet list of headings. The current section gets the accent
+// tick on the rail and stays scrolled into view.
+function Outline({ outline, activeSlug, onJump }: Props) {
+  const listRef = useRef<HTMLUListElement>(null)
+  const minLevel = outline.reduce((m, o) => Math.min(m, o.level), 6)
+
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>('.is-active')
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [activeSlug])
+
   return (
-    <div
-      className="smd-outline"
-      style={{
-        width: 240,
-        flex: 'none',
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'var(--bg-elev)',
-        borderLeft: '1px solid var(--border)',
-        minHeight: 0
-      }}
-    >
-      <div
-        style={{
-          height: 40,
-          flex: 'none',
-          display: 'flex',
-          alignItems: 'center',
-          padding: '0 14px',
-          borderBottom: '1px solid var(--border)'
-        }}
-      >
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: '.09em',
-            textTransform: 'uppercase',
-            color: 'var(--fg-muted)'
-          }}
-        >
-          Outline
-        </span>
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '10px 8px 30px' }}>
-        {outline.length === 0 ? (
-          <div style={{ fontSize: 12, color: 'var(--fg-faint)', padding: '8px 10px' }}>
-            No headings in this document.
-          </div>
-        ) : (
-          outline.map((o) => (
-            <button
-              key={o.key}
-              className="smd-olitem"
-              onClick={() => onJump(o.slug)}
-              style={{
-                padding: `5px 8px 5px ${8 + (o.level - 1) * 15}px`,
-                fontSize: o.level <= 1 ? 13 : o.level === 2 ? 12.5 : 12,
-                fontWeight: o.level <= 2 ? 600 : 400,
-                color: o.level === 1 ? 'var(--fg)' : 'var(--fg-muted)'
-              }}
-            >
-              {o.text}
-            </button>
-          ))
-        )}
-      </div>
-    </div>
+    <nav className="smd-outline" aria-label="On this page">
+      <div className="smd-outline-title">On this page</div>
+      {outline.length === 0 ? (
+        <div className="smd-ol-empty" style={{ margin: '0 12px 0 20px' }}>
+          Headings in this document will show up here.
+        </div>
+      ) : (
+        <ul ref={listRef} className="smd-outline-list">
+          {outline.map((o) => {
+            const depth = Math.min(3, o.level - minLevel)
+            const active = o.slug === activeSlug
+            return (
+              <li key={o.key}>
+                <button
+                  type="button"
+                  className={'smd-ol-item' + (depth === 0 ? ' smd-ol-item--l1' : '') + (active ? ' is-active' : '')}
+                  aria-current={active ? 'location' : undefined}
+                  style={{ paddingLeft: 12 + depth * 12 }}
+                  onClick={() => onJump(o.slug)}
+                  title={o.text}
+                >
+                  {o.text}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </nav>
   )
 }
+
+export default memo(Outline)

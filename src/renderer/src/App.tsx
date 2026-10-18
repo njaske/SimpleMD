@@ -1,1568 +1,712 @@
 import { Component, createRef, lazy, Suspense } from 'react'
-import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react'
-import type {
-  Activity,
-  DropResult,
-  FolderScan,
-  MdFileInfo,
-  MdFolderInfo,
-  OpenedFile,
-  ReadingFont,
-  ResolvedTheme,
-  Settings,
-  ThemeName,
-  ViewMode
-} from '@shared/types'
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
 import { computeOutline, computeStats, searchAll } from '@/lib/document'
+import type { SearchResult } from '@/lib/document'
 import { ReaderController } from '@/lib/reader/ReaderController'
-import type { SearchableFile, SearchResult } from '@/lib/document'
-import type { FolderItem, NamedFileRef, OutlineItem, TabItem } from '@/state/viewmodel'
-import TitleBar from '@/components/TitleBar'
-import ActivityBar from '@/components/ActivityBar'
+import type { EditorHandle } from '@/lib/editor/types'
+import { COMMANDS, commandLabel, rememberCommand, type CommandId, type PlatformWords } from '@/lib/commands'
+import { isAgentInstructionFile, titleFromMarkdown } from '@/lib/logic/files'
+import { formatShortcut, revealLabel, trashName } from '@/lib/logic/platform'
+import type { NamedFileRef, OutlineItem } from '@/state/viewmodel'
+import { InfoIcon } from '@/lib/icons'
 import Sidebar from '@/components/Sidebar'
-import Tabs from '@/components/Tabs'
-import Toolbar from '@/components/Toolbar'
+import TopBar from '@/components/TopBar'
 import Outline from '@/components/Outline'
 import StatusBar from '@/components/StatusBar'
-import EmptyState from '@/components/EmptyState'
-import type { EditorJump } from '@/components/CodeEditor'
+import Welcome from '@/components/Welcome'
+import ContextMenu, { type MenuEntry } from '@/components/ContextMenu'
+import AppOverlays, { prefetchOverlays } from '@/app/AppOverlays'
+import type { PaletteCommand } from '@/components/CommandPalette'
+import type { AppHost, Updater } from '@/app/host'
+import type { AppState } from '@/app/types'
+import { READING_FONTS, resolveTheme } from '@/app/appearance'
+import { baseName, dirOf, displayDir, isDirtyIn, isUntitled, unsavedIds, without } from '@/app/model'
+import { buildIndex, buildQuickOpen, buildTabs, buildTree, searchableFiles, type FileMeta } from '@/app/view'
+import { createDocumentActions } from '@/app/documents'
+import { createFileActions } from '@/app/files'
+import { createViewActions } from '@/app/viewActions'
+import { createExportActions } from '@/app/exporting'
+import { createDropTarget } from '@/app/dragDrop'
+import { DOC_MENU, TAB_LIST, documentMenu, fileMenu, folderMenu, tabListMenu, tabMenu, type MenuDeps } from '@/app/menus'
+import { buildCommandTable, type CommandTable } from '@/app/commandTable'
+import { createKeyHandler } from '@/app/keyboard'
+import { SettingsWriter, settingsSnapshot } from '@/app/persistence'
+import { RecoveryKeeper } from '@/app/recovery'
+import { bootstrap, restoreRecovered } from '@/app/bootstrap'
+import { initialState } from '@/app/initialState'
 // The CodeMirror editor is only needed in Edit/Split view. Load it lazily so the
 // (large) editor stack stays out of the startup chunk for read-only users.
 const CodeEditor = lazy(() => import('@/components/CodeEditor'))
-import ContextMenu, { type ContextMenuState, type MenuEntry } from '@/components/ContextMenu'
-import { FolderPlusIcon } from '@/lib/icons'
 
-interface ConfirmState {
-  title: string
-  message: string
-  confirmLabel: string
-  danger?: boolean
-  onConfirm: () => void | Promise<void>
-}
-
-const MAX_AUTO_OPEN = 40
-const MAX_RECENTS = 8
-/** Settings writes are coalesced for this long after the last change. */
-const PERSIST_DELAY_MS = 400
 /** Warm the lazy editor chunk this long after startup, off the critical path. */
 const EDITOR_PREFETCH_DELAY_MS = 2000
 const NO_SEARCH: SearchResult = { groups: [], total: 0, fileCount: 0 }
-const READING_FONTS: Record<ReadingFont, string> = {
-  Sans: "'Helvetica Neue',Helvetica,Arial,sans-serif",
-  Serif: "'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif",
-  Mono: 'var(--mono)',
-  Hyperlegible: "'Helvetica Neue',Helvetica,Arial,sans-serif"
-}
+/** Upper bound on how long a theme switch keeps transitions off. */
+const THEME_SWITCH_MS = 120
+const NARROW_QUERY = '(max-width: 999px)'
+const COMPACT_QUERY = '(max-width: 859px)'
 
-const darkQuery = typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)') : null
-
-/** The theme to paint: 'system' follows the OS. */
-function resolveTheme(theme: ThemeName): ResolvedTheme {
-  if (theme === 'system') return darkQuery?.matches ? 'dark' : 'light'
-  return theme
-}
-
-/** Last path segment of a file/dir path (handles both / and \\). */
-function baseName(p: string): string {
-  const parts = p.split(/[\\/]/).filter(Boolean)
-  return parts[parts.length - 1] || p
-}
-/** Parent directory of a path (handles both / and \\). */
-function dirOf(p: string): string {
-  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
-  return i > 0 ? p.slice(0, i) : p
-}
-
-interface FileMeta {
-  name: string
-  folderName: string
-  dir: string
-}
-
-interface AppState {
-  theme: ThemeName
-  /** Bumped when the OS light/dark preference changes, so 'system' re-resolves. */
-  systemThemeTick: number
-  accent: string
-  readingFont: ReadingFont
-  readingWidth: number
-  readingSize: number
-  lineHeight: number
-  uiScale: number
-  reduceMotion: boolean
-  syncScroll: boolean
-  blockRemoteImages: boolean
-  showStatusBar: boolean
-  activity: Activity
-  sidebarOpen: boolean
-  outlineOpen: boolean
-  viewMode: ViewMode
-  expanded: Record<string, boolean>
-  openTabs: string[]
-  activeId: string | null
-  searchQuery: string
-  pinned: string[]
-  recents: string[]
-  prefsOpen: boolean
-  contents: Record<string, string>
-  saved: Record<string, string>
-  tree: MdFolderInfo[]
-  root: string | null
-  rootName: string
-  isMaximized: boolean
-  statusNote: string | null
-  ready: boolean
-  closePrompt: boolean
-  externalChanges: Record<string, boolean>
-  editorJump: EditorJump | null
-  looseFiles: MdFileInfo[]
-  dragOver: boolean
-  menu: ContextMenuState | null
-  confirm: ConfirmState | null
-}
+const media = (q: string): MediaQueryList | null => (typeof window !== 'undefined' ? window.matchMedia(q) : null)
 
 export default class App extends Component<Record<string, never>, AppState> {
   private rootRef = createRef<HTMLDivElement>()
   private index = new Map<string, FileMeta>()
+  private memos = new Map<string, { deps: readonly unknown[]; value: unknown }>()
+  private editor: EditorHandle | null = null
+  private wantEditorFocus = false
+  private toastSeq = 0
+  private lastReportedUnsaved = false
+  private unsubs: (() => void)[] = []
+  private darkQuery = media('(prefers-color-scheme: dark)')
+  private narrowQuery = media(NARROW_QUERY)
+  private compactQuery = media(COMPACT_QUERY)
+  private platform = window.api.platform
+  private words: PlatformWords = { trash: trashName(this.platform), reveal: revealLabel(this.platform) }
+
   private reader = new ReaderController({
     readImage: (docPath, src) => window.api.readImage(docPath, src),
     onLink: (href) => this.openLink(href),
-    onToggleTask: () => {}
+    onToggleTask: () => {},
+    onActiveHeading: (slug) => {
+      if (slug !== this.state.activeSlug) this.setState({ activeSlug: slug })
+    }
   })
-  private memos = new Map<string, { deps: readonly unknown[]; value: unknown }>()
-  private scanning = false
-  private rescanQueued = false
-  private unsubMax: (() => void) | null = null
-  private unsubFolderChanged: (() => void) | null = null
-  private unsubRequestClose: (() => void) | null = null
-  private unsubOpenPaths: (() => void) | null = null
-  private persistTimer: ReturnType<typeof setTimeout> | null = null
-  private noteTimer: ReturnType<typeof setTimeout> | null = null
-  private lastPersist = ''
-  private lastReportedUnsaved = false
-  private dragDepth = 0
+
+  private host: AppHost = {
+    platform: this.platform,
+    reader: this.reader,
+    state: () => this.state,
+    update: (u: Updater, then?: () => void) => this.setState(u as Pick<AppState, keyof AppState>, then),
+    toast: (message, action) => this.setState({ toast: { id: ++this.toastSeq, message, action } }),
+    nameOf: (id) => this.nameOf(id),
+    renderDoc: (force) => this.renderDoc(force),
+    focusEditor: () => {
+      if (this.editor) this.editor.focus()
+      else this.wantEditorFocus = true
+    }
+  }
+  private files = createFileActions(this.host, () => this.docs)
+  private docs = createDocumentActions(this.host, { rescan: () => void this.files.reconcileFolder() })
+  private view = createViewActions(this.host)
+  private exports = createExportActions(this.host)
+  private drop = createDropTarget(this.host, this.files)
+  private menuDeps: MenuDeps = { host: this.host, docs: this.docs, files: this.files, exports: this.exports }
+  private commands: CommandTable = buildCommandTable({
+    host: this.host,
+    docs: this.docs,
+    files: this.files,
+    view: this.view,
+    exports: this.exports,
+    renameTarget: () => this.renameTarget()
+  })
+  private writer = new SettingsWriter((s) => window.api.setSettings(s))
+  private recovery = new RecoveryKeeper(this.host)
+  private onKey = createKeyHandler({
+    platform: this.platform,
+    modal: () => {
+      const s = this.state
+      if (s.dialog || s.settings || s.recovery) return 'dialog'
+      return s.palette ? 'palette' : null
+    },
+    available: (id) => this.isAvailable(id),
+    run: (id) => this.runCommand(id)
+  })
 
   constructor(props: Record<string, never>) {
     super(props)
-    this.state = {
-      theme: 'system',
-      systemThemeTick: 0,
-      accent: '#c0392b',
-      readingFont: 'Serif',
-      readingWidth: 720,
-      readingSize: 17,
-      lineHeight: 1.7,
-      uiScale: 1,
-      reduceMotion: false,
-      syncScroll: true,
-      blockRemoteImages: false,
-      showStatusBar: true,
-      activity: 'files',
-      sidebarOpen: true,
-      outlineOpen: true,
-      viewMode: 'read',
-      expanded: {},
-      openTabs: [],
-      activeId: null,
-      searchQuery: '',
-      pinned: [],
-      recents: [],
-      prefsOpen: false,
-      contents: {},
-      saved: {},
-      tree: [],
-      root: null,
-      rootName: '',
-      isMaximized: false,
-      statusNote: null,
-      ready: false,
-      closePrompt: false,
-      externalChanges: {},
-      editorJump: null,
-      looseFiles: [],
-      dragOver: false,
-      menu: null,
-      confirm: null
-    }
-    this.onKey = this.onKey.bind(this)
+    this.state = initialState({
+      systemDark: !!this.darkQuery?.matches,
+      narrow: !!this.narrowQuery?.matches,
+      compact: !!this.compactQuery?.matches
+    })
   }
 
   componentDidMount(): void {
-    this.unsubMax = window.api.win.onMaximizeChange((v) => this.setState({ isMaximized: v }))
-    window.api.win.isMaximized().then((v) => this.setState({ isMaximized: v }))
-    this.unsubFolderChanged = window.api.onFolderChanged(() => this.reconcileFolder())
-    this.unsubRequestClose = window.api.onRequestClose(() => this.setState({ closePrompt: true }))
-    this.unsubOpenPaths = window.api.onOpenPaths(this.openResult)
-    window.addEventListener('keydown', this.onKey)
+    const api = window.api
+    this.unsubs.push(
+      api.win.onMaximizeChange((v) => this.setState({ isMaximized: v })),
+      api.onFolderChanged(() => void this.files.reconcileFolder()),
+      api.onRequestClose(() => this.setState({ dialog: { kind: 'closeWindow' }, menu: null, palette: null })),
+      api.onOpenPaths(this.files.openResult)
+    )
+    api.win.isMaximized().then(
+      (v) => this.setState({ isMaximized: v }),
+      () => undefined
+    )
+    window.addEventListener('keydown', this.onKey, true)
+    window.addEventListener('keydown', this.onEscape)
     // Safety net so a cancelled/interrupted drag never leaves the overlay stuck.
-    window.addEventListener('dragend', this.resetDrag)
-    window.addEventListener('drop', this.resetDrag)
+    window.addEventListener('dragend', this.drop.reset)
+    window.addEventListener('drop', this.drop.reset)
     // React never unmounts when the window closes, so flush on pagehide too.
-    window.addEventListener('pagehide', this.flushPersist)
-    darkQuery?.addEventListener('change', this.onSystemTheme)
-    this.bootstrap()
+    window.addEventListener('pagehide', this.onPageHide)
+    this.darkQuery?.addEventListener('change', this.onMedia)
+    this.narrowQuery?.addEventListener('change', this.onMedia)
+    this.compactQuery?.addEventListener('change', this.onMedia)
+    void this.start()
   }
 
-  private onSystemTheme = (): void => this.setState((s) => ({ systemThemeTick: s.systemThemeTick + 1 }))
+  componentWillUnmount(): void {
+    window.removeEventListener('keydown', this.onKey, true)
+    window.removeEventListener('keydown', this.onEscape)
+    window.removeEventListener('dragend', this.drop.reset)
+    window.removeEventListener('drop', this.drop.reset)
+    window.removeEventListener('pagehide', this.onPageHide)
+    this.darkQuery?.removeEventListener('change', this.onMedia)
+    this.narrowQuery?.removeEventListener('change', this.onMedia)
+    this.compactQuery?.removeEventListener('change', this.onMedia)
+    this.unsubs.forEach((u) => u())
+    this.reader.dispose()
+    this.recovery.dispose()
+    this.writer.flush()
+  }
+
+  componentDidUpdate(_props: unknown, prev: AppState): void {
+    const s = this.state
+    if (
+      s.accent !== prev.accent ||
+      s.readingWidth !== prev.readingWidth ||
+      s.readingFont !== prev.readingFont ||
+      s.readingSize !== prev.readingSize ||
+      s.lineHeight !== prev.lineHeight
+    ) {
+      this.applyProps()
+    }
+    if (s.uiScale !== prev.uiScale) void window.api.win.setZoom(s.uiScale).catch(() => undefined)
+    if (resolveTheme(s.theme, s.systemDark) !== resolveTheme(prev.theme, prev.systemDark)) this.switchThemeCrisply()
+    if (s.activeId !== prev.activeId) this.setState({ activeSlug: null })
+    this.renderDoc(false)
+    // Not before the session is back: an early write would save an empty tab strip.
+    if (s.restored) this.writer.persist(settingsSnapshot(s))
+    if (s.contents !== prev.contents || s.saved !== prev.saved) {
+      this.reportUnsaved()
+      this.recovery.schedule()
+    }
+  }
+
+  /** Hover/press transitions would make each surface change colour at its own speed
+   *  on a theme switch; turn them off until the new theme has painted. */
+  private switchThemeCrisply(): void {
+    const r = this.rootRef.current
+    if (!r) return
+    r.classList.add('smd-theme-switching')
+    const done = (): void => r.classList.remove('smd-theme-switching')
+    requestAnimationFrame(() => requestAnimationFrame(done))
+    // rAF is paused in a hidden window; don't leave transitions off until it shows.
+    setTimeout(done, THEME_SWITCH_MS)
+  }
+
+  private onPageHide = (): void => {
+    this.writer.flush()
+    void this.recovery.flush()
+  }
+
+  private onMedia = (): void =>
+    this.setState((s) => {
+      const compact = !!this.compactQuery?.matches
+      return {
+        systemDark: !!this.darkQuery?.matches,
+        narrow: !!this.narrowQuery?.matches,
+        compact,
+        sidebarPeek: compact ? s.sidebarPeek : false
+      }
+    })
+
+  /** Esc leaves focus mode once every overlay has had its turn (they stop the event). */
+  private onEscape = (e: KeyboardEvent): void => {
+    if (e.key !== 'Escape' || e.defaultPrevented) return
+    if (this.state.sidebarPeek) this.setState({ sidebarPeek: false })
+    else if (this.state.focusMode) this.setState({ focusMode: false })
+  }
 
   private setReaderEl = (el: HTMLDivElement | null): void => this.reader.attach(el)
+
+  private onEditorReady = (handle: EditorHandle | null): void => {
+    this.editor = handle
+    if (handle && this.wantEditorFocus) {
+      this.wantEditorFocus = false
+      handle.focus()
+    }
+  }
 
   /** Repaint the reader from current state (cheap when nothing changed). */
   private renderDoc(force: boolean): void {
     const s = this.state
     const id = s.activeId
     this.reader.update(
-      { id, path: id && !id.startsWith('untitled:') ? id : null, md: this.contentOf(id) },
-      { mode: s.viewMode, theme: resolveTheme(s.theme), blockRemoteImages: s.blockRemoteImages },
+      { id, path: id && !isUntitled(id) ? id : null, md: id ? (s.contents[id] ?? '') : '' },
+      { mode: s.viewMode, theme: resolveTheme(s.theme, s.systemDark), blockRemoteImages: s.blockRemoteImages },
       force
     )
-  }
-
-  private flushPersist = (): void => {
-    if (!this.persistTimer) return
-    clearTimeout(this.persistTimer)
-    this.persistTimer = null
-    if (this.lastPersist) window.api.setSettings(JSON.parse(this.lastPersist))
-  }
-
-  componentWillUnmount(): void {
-    window.removeEventListener('keydown', this.onKey)
-    window.removeEventListener('dragend', this.resetDrag)
-    window.removeEventListener('drop', this.resetDrag)
-    window.removeEventListener('pagehide', this.flushPersist)
-    darkQuery?.removeEventListener('change', this.onSystemTheme)
-    this.unsubMax?.()
-    this.unsubFolderChanged?.()
-    this.unsubRequestClose?.()
-    this.unsubOpenPaths?.()
-    if (this.noteTimer) clearTimeout(this.noteTimer)
-    this.reader.dispose()
-    // Flush any pending settings write so nothing is lost on close.
-    this.flushPersist()
-  }
-
-  componentDidUpdate(_props: unknown, prev: AppState): void {
-    const s = this.state
-    if (
-      s.accent !== prev.accent || s.readingWidth !== prev.readingWidth || s.readingFont !== prev.readingFont ||
-      s.readingSize !== prev.readingSize || s.lineHeight !== prev.lineHeight
-    ) {
-      this.applyProps()
-    }
-    if (s.uiScale !== prev.uiScale) void window.api.win.setZoom(s.uiScale)
-    this.renderDoc(false)
-    if (
-      s.theme !== prev.theme || s.accent !== prev.accent || s.readingFont !== prev.readingFont ||
-      s.readingWidth !== prev.readingWidth || s.readingSize !== prev.readingSize ||
-      s.lineHeight !== prev.lineHeight || s.uiScale !== prev.uiScale ||
-      s.reduceMotion !== prev.reduceMotion || s.syncScroll !== prev.syncScroll ||
-      s.blockRemoteImages !== prev.blockRemoteImages || s.showStatusBar !== prev.showStatusBar ||
-      s.activity !== prev.activity ||
-      s.sidebarOpen !== prev.sidebarOpen || s.outlineOpen !== prev.outlineOpen ||
-      s.viewMode !== prev.viewMode || s.pinned !== prev.pinned || s.recents !== prev.recents ||
-      s.openTabs !== prev.openTabs || s.activeId !== prev.activeId ||
-      s.looseFiles !== prev.looseFiles || s.ready !== prev.ready
-    ) {
-      this.persist()
-    }
-    if (s.contents !== prev.contents || s.saved !== prev.saved) this.reportUnsaved()
   }
 
   /** Memoize a derived value on reference equality of its inputs, so typing in
    *  the editor doesn't rebuild the file tree, outline or search results. */
   private memo<T>(key: string, deps: readonly unknown[], compute: () => T): T {
     const hit = this.memos.get(key)
-    if (hit && hit.deps.length === deps.length && hit.deps.every((d, i) => Object.is(d, deps[i]))) {
-      return hit.value as T
-    }
+    if (hit && hit.deps.length === deps.length && hit.deps.every((d, i) => Object.is(d, deps[i]))) return hit.value as T
     const value = compute()
     this.memos.set(key, { deps, value })
     return value
   }
 
-  private async bootstrap(): Promise<void> {
-    const s = await window.api.getSettings()
-    this.setState(
-      {
-        theme: s.theme,
-        accent: s.accent,
-        readingFont: s.readingFont,
-        readingWidth: s.readingWidth,
-        readingSize: s.readingSize,
-        lineHeight: s.lineHeight,
-        uiScale: s.uiScale,
-        reduceMotion: s.reduceMotion,
-        syncScroll: s.syncScroll,
-        blockRemoteImages: s.blockRemoteImages,
-        showStatusBar: s.showStatusBar,
-        activity: s.activity,
-        sidebarOpen: s.sidebarOpen,
-        outlineOpen: s.outlineOpen,
-        viewMode: s.viewMode,
-        pinned: s.pinned,
-        recents: s.recents,
-        ready: true
-      },
-      () => {
+  private async start(): Promise<void> {
+    await bootstrap({
+      host: this.host,
+      files: this.files,
+      recovery: this.recovery,
+      onSettings: (st) => {
         this.applyProps()
-        if (s.uiScale !== 1) void window.api.win.setZoom(s.uiScale)
+        if (st.uiScale !== 1) void window.api.win.setZoom(st.uiScale).catch(() => undefined)
         this.renderDoc(true)
       }
-    )
-    // The three disk reads below are independent, so start them together and
-    // apply the results in the original order.
-    const looseRead = this.readLooseFiles(s.looseFiles)
-    const folderScan = s.lastFolder
-      ? window.api.scanFolder(s.lastFolder).catch(() => null)
-      : Promise.resolve(null)
-    const launchFiles = window.api.takeLaunchFiles().catch(() => null)
-
-    // Restore individually-opened files into the tree (without reopening tabs;
-    // the persisted openTabs already reference them).
-    const valid = await looseRead
-    const loosePaths = valid.map((x) => x.path)
-    if (valid.length) this.addLooseFiles(valid, { open: false })
-
-    if (s.lastFolder) {
-      const scan = await folderScan
-      if (scan) {
-        this.applyScan(scan, {
-          restoreTabs: s.openTabs,
-          restoreActive: s.activeId,
-          availablePaths: new Set(loosePaths)
-        })
-      }
-    } else if (loosePaths.length) {
-      // No workspace folder — restore just the loose-file tabs.
-      this.setState(() => {
-        const openTabs = s.openTabs.filter((p) => loosePaths.includes(p))
-        const activeId = s.activeId && openTabs.includes(s.activeId) ? s.activeId : openTabs[0] ?? null
-        return { openTabs, activeId }
-      }, () => this.renderDoc(true))
-    }
-
-    // Files opened from the shell (double-click, "Open with") that started this
-    // launch go on top of the restored session.
-    const launched = await launchFiles
-    if (launched) this.openResult(launched)
-
-    // Warm the editor chunk once the first document is up, so the first switch
-    // to Edit/Split doesn't wait on a ~1 MB parse.
-    // Compiling it blocks the thread briefly, so wait for an idle moment too.
-    setTimeout(
-      () => requestIdleCallback(() => void import('@/components/CodeEditor'), { timeout: 10_000 }),
-      EDITOR_PREFETCH_DELAY_MS
-    )
+    })
+    // Warm the lazy chunks once the first document is up, so the first switch to
+    // Edit/Split (or the first palette) doesn't wait on a parse.
+    setTimeout(() => {
+      requestIdleCallback(prefetchOverlays, { timeout: 5_000 })
+      requestIdleCallback(() => void import('@/components/CodeEditor'), { timeout: 10_000 })
+    }, EDITOR_PREFETCH_DELAY_MS)
   }
 
-  private async readLooseFiles(paths: string[] | undefined): Promise<OpenedFile[]> {
-    if (!paths || !paths.length) return []
-    const items = await Promise.all(
-      paths.map(async (p) => {
-        try {
-          return { path: p, content: await window.api.readFile(p) }
-        } catch {
-          return null
-        }
-      })
-    )
-    return items.filter((x): x is OpenedFile => x !== null)
+  private discardRecovered = (): void => {
+    this.setState({ recovery: null })
+    void this.recovery.clear().then(() => this.recovery.enable())
   }
 
   private applyProps(): void {
     const r = this.rootRef.current
     if (!r) return
-    r.style.setProperty('--accent', this.state.accent)
-    r.style.setProperty('--read-width', this.state.readingWidth + 'px')
-    r.style.setProperty('--read-font', READING_FONTS[this.state.readingFont])
-    r.style.setProperty('--read-size', this.state.readingSize + 'px')
-    r.style.setProperty('--read-leading', String(this.state.lineHeight))
-  }
-
-  private persist(): void {
     const s = this.state
-    if (!s.ready) return
-    const snapshot: Partial<Settings> = {
-      theme: s.theme,
-      accent: s.accent,
-      readingFont: s.readingFont,
-      readingWidth: s.readingWidth,
-      readingSize: s.readingSize,
-      lineHeight: s.lineHeight,
-      uiScale: s.uiScale,
-      reduceMotion: s.reduceMotion,
-      syncScroll: s.syncScroll,
-      blockRemoteImages: s.blockRemoteImages,
-      showStatusBar: s.showStatusBar,
-      activity: s.activity,
-      sidebarOpen: s.sidebarOpen,
-      outlineOpen: s.outlineOpen,
-      viewMode: s.viewMode,
-      pinned: s.pinned,
-      recents: s.recents,
-      openTabs: s.openTabs,
-      activeId: s.activeId,
-      looseFiles: s.looseFiles.map((f) => f.path)
-    }
-    const key = JSON.stringify(snapshot)
-    if (key === this.lastPersist) return
-    this.lastPersist = key
-    if (this.persistTimer) clearTimeout(this.persistTimer)
-    this.persistTimer = setTimeout(() => {
-      this.persistTimer = null
-      window.api.setSettings(snapshot)
-    }, PERSIST_DELAY_MS)
+    r.style.setProperty('--accent', s.accent)
+    r.style.setProperty('--read-width', `${s.readingWidth}px`)
+    r.style.setProperty('--read-font', READING_FONTS[s.readingFont])
+    r.style.setProperty('--read-size', `${s.readingSize}px`)
+    r.style.setProperty('--read-leading', String(s.lineHeight))
   }
 
-  // ---- data helpers --------------------------------------------------------
+  // ---- names, commands, menus ----------------------------------------------------
 
-  private fileMeta(id: string): NamedFileRef {
-    const meta = this.index.get(id)
-    if (meta) return { id, name: meta.name, folder: meta.folderName }
-    const name = id.split(/[\\/]/).pop() || id
-    return { id, name, folder: '' }
+  private nameOf(id: string): string {
+    if (isUntitled(id)) return titleFromMarkdown(this.state.contents[id] ?? '') ?? 'Untitled'
+    return this.index.get(id)?.name ?? baseName(id)
   }
 
-  private contentOf(id: string | null): string {
-    if (!id) return ''
-    return this.state.contents[id] ?? ''
+  private hint = (shortcut: string): string => formatShortcut(shortcut, this.platform)
+
+  private isAvailable(id: CommandId): boolean {
+    const b = this.commands[id]
+    return !!b && (b.enabled?.() ?? true)
   }
 
-  private isDirty(id: string): boolean {
-    const c = this.state.contents[id]
-    const saved = this.state.saved[id]
-    return c !== undefined && saved !== undefined && c !== saved
+  private hasCommand = (id: CommandId): boolean => !!this.commands[id]
+
+  private runCommand = (id: CommandId): void => {
+    const b = this.commands[id]
+    if (!b || !(b.enabled?.() ?? true)) return
+    this.setState((s) => ({ recentCommands: rememberCommand(s.recentCommands, id) }))
+    b.run()
   }
 
-  private computeRecents(ids: string[], prev: string[]): string[] {
-    const merged = [...ids, ...prev]
-    return merged.filter((v, i) => merged.indexOf(v) === i).slice(0, MAX_RECENTS)
-  }
-
-  // ---- folder / file actions ----------------------------------------------
-
-  private applyScan(
-    scan: FolderScan,
-    opts: {
-      openAll?: boolean
-      focusFiles?: boolean
-      restoreTabs?: string[]
-      restoreActive?: string | null
-      availablePaths?: Set<string>
-    }
-  ): void {
-    const expanded: Record<string, boolean> = {}
-    scan.tree.forEach((folder, i) => {
-      expanded[folder.id] = scan.tree.length <= 6 ? true : i < 3
-    })
-
-    const allFiles = scan.tree.flatMap((f) => f.files.map((x) => x.path))
-    let openTabs: string[] = []
-    let activeId: string | null = null
-    let statusNote: string | null = null
-
-    if (opts.restoreTabs && opts.restoreTabs.length) {
-      openTabs = opts.restoreTabs.filter(
-        (p) => scan.contents[p] !== undefined || opts.availablePaths?.has(p)
-      )
-      activeId =
-        opts.restoreActive && openTabs.includes(opts.restoreActive)
-          ? opts.restoreActive
-          : openTabs[0] ?? null
-    }
-    if (opts.openAll) {
-      openTabs = allFiles.slice(0, MAX_AUTO_OPEN)
-      activeId = openTabs[0] ?? null
-      if (allFiles.length > MAX_AUTO_OPEN) {
-        statusNote = `Opened ${MAX_AUTO_OPEN} of ${allFiles.length} Markdown files`
-      } else if (allFiles.length > 0) {
-        statusNote = `Opened ${allFiles.length} Markdown file${allFiles.length === 1 ? '' : 's'}`
-      }
-    }
-    if (!openTabs.length && allFiles.length) {
-      openTabs = [allFiles[0]]
-      activeId = allFiles[0]
-    }
-
-    this.setState(
-      (prev) => ({
-        tree: scan.tree,
-        root: scan.root,
-        rootName: scan.name,
-        contents: { ...prev.contents, ...scan.contents },
-        saved: { ...prev.saved, ...scan.contents },
-        // Files now covered by the workspace shouldn't also linger as loose groups.
-        looseFiles: prev.looseFiles.filter((f) => scan.contents[f.path] === undefined),
-        expanded,
-        openTabs,
-        activeId,
-        recents: this.computeRecents(activeId ? [activeId] : [], prev.recents),
-        activity: opts.focusFiles ? 'files' : prev.activity,
-        sidebarOpen: opts.focusFiles ? true : prev.sidebarOpen,
-        prefsOpen: false,
-        statusNote
-      }),
-      () => {
-        this.renderDoc(true)
-        this.flashNote()
-      }
-    )
-  }
-
-  private flashNote(): void {
-    if (this.noteTimer) clearTimeout(this.noteTimer)
-    if (!this.state.statusNote) return
-    this.noteTimer = setTimeout(() => this.setState({ statusNote: null }), 2600)
-  }
-
-  private openFolderDialog = async (): Promise<void> => {
-    const scan = await window.api.openFolder()
-    if (scan) this.applyScan(scan, { openAll: true, focusFiles: true })
-  }
-
-  private openFilesDialog = async (): Promise<void> => {
-    const files = await window.api.openFiles()
-    if (files && files.length) this.addLooseFiles(files)
-  }
-
-  /** Register individually-opened files into the tree (grouped by directory).
-   *  With { open: false } it only populates the tree/index without opening tabs. */
-  private addLooseFiles = (files: OpenedFile[], opts: { open?: boolean } = {}): void => {
-    if (!files.length) return
-    const open = opts.open !== false
-    this.setState(
-      (s) => {
-        const contents = { ...s.contents }
-        const saved = { ...s.saved }
-        const byPath = new Map(s.looseFiles.map((f) => [f.path, f]))
-        const added: string[] = []
-        for (const f of files) {
-          contents[f.path] = f.content
-          saved[f.path] = f.content
-          if (!byPath.has(f.path)) {
-            byPath.set(f.path, { id: f.path, name: baseName(f.path), path: f.path, dir: dirOf(f.path) })
-          }
-          added.push(f.path)
-        }
-        const looseFiles = [...byPath.values()]
-        if (!open) {
-          return {
-            contents,
-            saved,
-            looseFiles,
-            openTabs: s.openTabs,
-            activeId: s.activeId,
-            activity: s.activity,
-            sidebarOpen: s.sidebarOpen,
-            prefsOpen: s.prefsOpen,
-            recents: s.recents,
-            statusNote: s.statusNote
-          }
-        }
-        const openTabs = [...s.openTabs]
-        for (const p of added) if (!openTabs.includes(p)) openTabs.push(p)
-        return {
-          contents,
-          saved,
-          looseFiles,
-          openTabs,
-          activeId: added[added.length - 1] ?? s.activeId,
-          activity: 'files' as Activity,
-          sidebarOpen: true,
-          prefsOpen: false,
-          recents: this.computeRecents(added.slice().reverse(), s.recents),
-          statusNote: `Opened ${added.length} file${added.length === 1 ? '' : 's'}`
-        }
-      },
-      open ? this.flashNote.bind(this) : undefined
-    )
-  }
-
-  // ---- drag & drop ---------------------------------------------------------
-
-  private dragHasFiles(e: ReactDragEvent): boolean {
-    return Array.from(e.dataTransfer?.types ?? []).includes('Files')
-  }
-
-  private onDragEnter = (e: ReactDragEvent): void => {
-    if (!this.dragHasFiles(e)) return
-    e.preventDefault()
-    this.dragDepth++
-    if (this.dragDepth === 1) this.setState({ dragOver: true })
-  }
-
-  private onDragOver = (e: ReactDragEvent): void => {
-    if (!this.dragHasFiles(e)) return
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'copy'
-  }
-
-  private onDragLeave = (): void => {
-    if (this.dragDepth === 0) return
-    this.dragDepth = Math.max(0, this.dragDepth - 1)
-    if (this.dragDepth === 0) this.setState({ dragOver: false })
-  }
-
-  private resetDrag = (): void => {
-    this.dragDepth = 0
-    if (this.state.dragOver) this.setState({ dragOver: false })
-  }
-
-  private onDrop = async (e: ReactDragEvent): Promise<void> => {
-    if (!this.dragHasFiles(e)) return
-    e.preventDefault()
-    this.dragDepth = 0
-    this.setState({ dragOver: false })
-    const files = Array.from(e.dataTransfer.files)
-    if (!files.length) return
-    const result = await window.api.resolveDrop(files)
-    if (!result.folder && result.files.length === 0) {
-      this.setState(
-        { statusNote: 'Nothing to open — drop Markdown files or a folder' },
-        this.flashNote.bind(this)
-      )
-      return
-    }
-    this.openResult(result)
-  }
-
-  /** Show what the main process resolved from a drop, a launch argument or
-   *  a file opened from the shell. */
-  private openResult = (result: DropResult): void => {
-    if (result.folder) this.applyScan(result.folder, { openAll: true, focusFiles: true })
-    if (result.files.length) this.addLooseFiles(result.files)
-  }
-
-  // ---- context menu & file management --------------------------------------
-
-  private closeMenu = (): void => this.setState({ menu: null })
-
-  private showFileMenu = (id: string, e: ReactMouseEvent): void => {
-    e.preventDefault()
-    const name = this.fileMeta(id).name
-    const isLoose = this.state.looseFiles.some((f) => f.path === id)
-    const isOpen = this.state.openTabs.includes(id)
-    const pinned = this.state.pinned.includes(id)
-    const items: MenuEntry[] = [
-      { label: 'Open', onSelect: () => this.openFile(id) },
-      { label: pinned ? 'Unpin' : 'Pin', onSelect: () => this.togglePin(id) }
-    ]
-    if (isOpen) items.push({ label: 'Close', onSelect: () => this.closeTab(id) })
-    items.push(
-      { separator: true },
-      { label: 'Copy path', onSelect: () => this.copyPath(id) },
-      { label: 'Reveal in File Explorer', onSelect: () => window.api.revealItem(id) }
-    )
-    if (isLoose) items.push({ label: 'Remove from sidebar', onSelect: () => this.removeFileFromState(id) })
-    items.push(
-      { separator: true },
-      { label: 'Move to Recycle Bin', danger: true, onSelect: () => this.confirmTrashFile(id, name) }
-    )
-    this.setState({ menu: { x: e.clientX, y: e.clientY, items } })
-  }
-
-  private showFolderMenu = (folderId: string, e: ReactMouseEvent): void => {
-    e.preventDefault()
-    const isWorkspace = this.state.tree.some((fo) => fo.id === folderId)
-    const name = baseName(folderId)
-    const items: MenuEntry[] = [
-      { label: 'Open all files', onSelect: () => this.openAllInFolder(folderId) },
-      { separator: true },
-      { label: 'Copy path', onSelect: () => this.copyPath(folderId) },
-      { label: 'Reveal in File Explorer', onSelect: () => window.api.revealItem(folderId) },
-      { separator: true },
-      isWorkspace
-        ? { label: 'Move folder to Recycle Bin', danger: true, onSelect: () => this.confirmTrashFolder(folderId, name) }
-        : { label: 'Remove from sidebar', onSelect: () => this.removeLooseGroup(folderId) }
-    ]
-    this.setState({ menu: { x: e.clientX, y: e.clientY, items } })
-  }
-
-  private copyPath = (p: string): void => {
-    navigator.clipboard?.writeText(p).catch(() => {})
-    this.setState({ statusNote: 'Path copied' }, this.flashNote.bind(this))
-  }
-
-  private confirmTrashFile = (id: string, name: string): void =>
-    this.setState({
-      confirm: {
-        title: 'Move to Recycle Bin?',
-        message: `"${name}" will be moved to the Recycle Bin.`,
-        confirmLabel: 'Move to Recycle Bin',
-        danger: true,
-        onConfirm: async () => {
-          const ok = await window.api.trashItem(id)
-          this.removeFileFromState(id)
-          this.setState(
-            { statusNote: ok ? `Moved ${name} to Recycle Bin` : `Could not delete ${name}` },
-            this.flashNote.bind(this)
-          )
-        }
-      }
-    })
-
-  private confirmTrashFolder = (folderId: string, name: string): void =>
-    this.setState({
-      confirm: {
-        title: 'Move folder to Recycle Bin?',
-        message: `"${name}" and all its files will be moved to the Recycle Bin.`,
-        confirmLabel: 'Move to Recycle Bin',
-        danger: true,
-        onConfirm: async () => {
-          const ok = await window.api.trashItem(folderId)
-          // The file watcher reconciles the tree once the folder is gone.
-          this.setState(
-            { statusNote: ok ? `Moved ${name} to Recycle Bin` : `Could not delete ${name}` },
-            this.flashNote.bind(this)
-          )
-        }
-      }
-    })
-
-  private removeFileFromState = (id: string): void =>
-    this.setState((s) => {
-      const contents = { ...s.contents }
-      delete contents[id]
-      const saved = { ...s.saved }
-      delete saved[id]
-      const externalChanges = { ...s.externalChanges }
-      delete externalChanges[id]
-      const idx = s.openTabs.indexOf(id)
-      const openTabs = s.openTabs.filter((t) => t !== id)
-      let activeId = s.activeId
-      if (activeId === id) activeId = openTabs[idx] || openTabs[idx - 1] || openTabs[openTabs.length - 1] || null
-      return {
-        contents,
-        saved,
-        externalChanges,
-        openTabs,
-        activeId,
-        pinned: s.pinned.filter((p) => p !== id),
-        recents: s.recents.filter((r) => r !== id),
-        looseFiles: s.looseFiles.filter((f) => f.path !== id)
-      }
-    })
-
-  private removeLooseGroup = (dir: string): void => {
-    this.state.looseFiles
-      .filter((f) => f.dir === dir)
-      .forEach((f) => this.removeFileFromState(f.path))
-  }
-
-  private cancelConfirm = (): void => this.setState({ confirm: null })
-
-  private runConfirm = (): void => {
-    const c = this.state.confirm
-    this.setState({ confirm: null }, () => {
-      c?.onConfirm()
-    })
-  }
-
-  private openFile = async (id: string): Promise<void> => {
-    if (this.state.contents[id] === undefined) {
-      try {
-        const c = await window.api.readFile(id)
-        this.setState((s) => ({ contents: { ...s.contents, [id]: c }, saved: { ...s.saved, [id]: c } }))
-      } catch {
-        // File missing/unreadable (e.g. a stale pinned/recent entry): tell the
-        // user and don't open a blank tab or promote it to recents.
-        this.setState({ statusNote: `Could not open ${baseName(id)} — file missing or unreadable` }, this.flashNote.bind(this))
-        return
-      }
-    }
-    this.setState((s) => ({
-      openTabs: s.openTabs.includes(id) ? s.openTabs : [...s.openTabs, id],
-      activeId: id,
-      recents: [id, ...s.recents.filter((r) => r !== id)].slice(0, MAX_RECENTS)
-    }))
-  }
-
-  private setActive = (id: string): void => this.setState({ activeId: id })
-
-  private closeTab = (id: string): void =>
-    this.setState((s) => {
-      const idx = s.openTabs.indexOf(id)
-      const openTabs = s.openTabs.filter((t) => t !== id)
-      let activeId = s.activeId
-      if (activeId === id) {
-        activeId = openTabs[idx] || openTabs[idx - 1] || openTabs[openTabs.length - 1] || null
-      }
-      return { openTabs, activeId }
-    })
-
-  private toggleFolder = (id: string): void =>
-    this.setState((s) => ({ expanded: { ...s.expanded, [id]: !(s.expanded[id] ?? true) } }))
-
-  private openAllInFolder = (folderId: string): void => {
-    // A group may be a workspace folder, a loose-file group, or both.
-    const treeFolder = this.state.tree.find((f) => f.id === folderId)
-    const looseInDir = this.state.looseFiles.filter((f) => f.dir === folderId)
-    const ids = [
-      ...(treeFolder ? treeFolder.files.map((f) => f.path) : []),
-      ...looseInDir.map((f) => f.path).filter((p) => !treeFolder?.files.some((tf) => tf.path === p))
-    ]
-    if (!ids.length) return
-    const name = treeFolder ? treeFolder.name : baseName(folderId)
-    this.setState((s) => {
-      const openTabs = [...s.openTabs]
-      ids.forEach((p) => {
-        if (!openTabs.includes(p)) openTabs.push(p)
-      })
-      return {
-        openTabs,
-        activeId: ids[0] ?? s.activeId,
-        expanded: { ...s.expanded, [folderId]: true },
-        activity: 'files',
-        sidebarOpen: true,
-        recents: this.computeRecents(ids.slice().reverse(), s.recents),
-        statusNote: `Opened ${ids.length} file${ids.length === 1 ? '' : 's'} from ${name}`
-      }
-    }, this.flashNote.bind(this))
-  }
-
-  private togglePin = (id: string): void =>
-    this.setState((s) => ({
-      pinned: s.pinned.includes(id) ? s.pinned.filter((p) => p !== id) : [...s.pinned, id]
-    }))
-
-  private toggleTheme = (): void =>
-    this.setState((s) => ({ theme: resolveTheme(s.theme) === 'dark' ? 'light' : 'dark' }))
-  private toggleSidebar = (): void => this.setState((s) => ({ sidebarOpen: !s.sidebarOpen }))
-  private toggleOutline = (): void => this.setState((s) => ({ outlineOpen: !s.outlineOpen }))
-  private togglePrefs = (): void => this.setState((s) => ({ prefsOpen: !s.prefsOpen }))
-
-  private setActivity = (a: Activity): void =>
-    this.setState((s) => ({ activity: a, sidebarOpen: s.activity === a ? !s.sidebarOpen : true, prefsOpen: false }))
-
-  private setView = (v: ViewMode): void => this.setState({ viewMode: v })
-  private onSearch = (value: string): void => this.setState({ searchQuery: value })
-
-  private onEditorChange = (value: string): void =>
-    this.setState((s) => (s.activeId ? { contents: { ...s.contents, [s.activeId]: value } } : null))
-
-  private setAccent = (value: string): void => this.setState({ accent: value })
-  private setFont = (value: ReadingFont): void => this.setState({ readingFont: value })
-  private setWidth = (value: number): void => this.setState({ readingWidth: value })
-
-  private saveActive = async (): Promise<void> => {
+  /** F2 target: the focused tree row, else the active document. */
+  private renameTarget(): { path: string; isFolder: boolean } | null {
+    const el = document.activeElement as HTMLElement | null
+    if (el?.dataset.path) return { path: el.dataset.path, isFolder: false }
+    if (el?.dataset.folder && el.dataset.folder !== this.state.root) return { path: el.dataset.folder, isFolder: true }
     const id = this.state.activeId
-    if (!id) return
-    const content = this.state.contents[id]
-    if (content === undefined || this.state.saved[id] === content) return
-    try {
-      await window.api.saveFile(id, content)
-      this.setState((s) => ({ saved: { ...s.saved, [id]: content } }))
-    } catch {
-      this.setState({ statusNote: 'Could not save file' }, this.flashNote.bind(this))
-    }
+    return id && !isUntitled(id) ? { path: id, isFolder: false } : null
   }
 
-  // ---- unsaved-changes tracking & close guard ------------------------------
-
-  private hasUnsavedChanges(): boolean {
-    const { contents, saved } = this.state
-    return Object.keys(contents).some((id) => saved[id] !== undefined && contents[id] !== saved[id])
-  }
-
-  private unsavedFiles(): string[] {
-    const { contents, saved } = this.state
-    return Object.keys(contents).filter((id) => saved[id] !== undefined && contents[id] !== saved[id])
-  }
-
-  private reportUnsaved(): void {
-    const has = this.hasUnsavedChanges()
-    if (has !== this.lastReportedUnsaved) {
-      this.lastReportedUnsaved = has
-      window.api.setUnsaved(has)
-    }
-  }
-
-  private saveAll = async (): Promise<void> => {
-    for (const id of this.unsavedFiles()) {
-      const content = this.state.contents[id]
-      try {
-        await window.api.saveFile(id, content)
-        this.setState((s) => ({ saved: { ...s.saved, [id]: content } }))
-      } catch {
-        // keep dirty on failure
+  private openMenu(
+    items: MenuEntry[],
+    e: ReactMouseEvent | ReactKeyboardEvent,
+    keyboard: boolean,
+    label: string
+  ): void {
+    const target = e.currentTarget as HTMLElement
+    const rect = target.getBoundingClientRect()
+    const mouse = 'clientX' in e && !keyboard
+    this.setState({
+      menu: {
+        x: mouse ? (e as ReactMouseEvent).clientX : rect.left + 12,
+        y: mouse ? (e as ReactMouseEvent).clientY : rect.bottom,
+        items,
+        label,
+        keyboard
       }
-    }
-  }
-
-  private confirmSaveAndClose = async (): Promise<void> => {
-    await this.saveAll()
-    window.api.win.forceClose()
-  }
-
-  private confirmDiscardAndClose = (): void => {
-    window.api.win.forceClose()
-  }
-
-  private cancelClose = (): void => this.setState({ closePrompt: false })
-
-  // ---- external change reconciliation (file watching) ----------------------
-
-  private reconcileFolder = async (): Promise<void> => {
-    // One re-scan at a time; changes that land mid-scan trigger a single follow-up.
-    if (this.scanning) {
-      this.rescanQueued = true
-      return
-    }
-    const root = this.state.root
-    if (!root) return
-    this.scanning = true
-    let scan: FolderScan | null = null
-    try {
-      scan = await window.api.scanFolder(root)
-    } finally {
-      this.scanning = false
-    }
-    if (this.rescanQueued) {
-      this.rescanQueued = false
-      void this.reconcileFolder()
-    }
-    if (!scan) return
-    this.applyReconcile(scan)
-  }
-
-  private applyReconcile(scan: FolderScan): void {
-    this.setState((s) => {
-      const contents = { ...s.contents }
-      const saved = { ...s.saved }
-      const externalChanges = { ...s.externalChanges }
-      let reloaded = 0
-      for (const [id, diskText] of Object.entries(scan.contents)) {
-        const cur = contents[id]
-        const base = saved[id]
-        const dirty = cur !== undefined && base !== undefined && cur !== base
-        if (dirty) {
-          // Don't clobber unsaved edits — flag a conflict if disk diverged.
-          if (diskText !== base) externalChanges[id] = true
-        } else {
-          if (cur !== diskText) reloaded++
-          contents[id] = diskText
-          saved[id] = diskText
-          delete externalChanges[id]
-        }
-      }
-
-      // Remove workspace files that vanished from disk (unless edited or loose).
-      const looseSet = new Set(s.looseFiles.map((f) => f.path))
-      let removed = 0
-      for (const folder of s.tree) {
-        for (const file of folder.files) {
-          const p = file.path
-          if (scan.contents[p] !== undefined || looseSet.has(p)) continue
-          const dirty = contents[p] !== undefined && saved[p] !== undefined && contents[p] !== saved[p]
-          if (dirty) {
-            externalChanges[p] = true // keep unsaved edits; flag the conflict
-            continue
-          }
-          delete contents[p]
-          delete saved[p]
-          delete externalChanges[p]
-          removed++
-        }
-      }
-      let openTabs = s.openTabs
-      let activeId = s.activeId
-      if (removed > 0) {
-        openTabs = s.openTabs.filter((p) => contents[p] !== undefined || looseSet.has(p))
-        if (activeId && contents[activeId] === undefined && !looseSet.has(activeId)) {
-          activeId = openTabs[0] ?? null
-        }
-      }
-
-      const statusNote =
-        reloaded > 0
-          ? `Reloaded ${reloaded} file${reloaded === 1 ? '' : 's'} changed on disk`
-          : removed > 0
-            ? `${removed} file${removed === 1 ? '' : 's'} removed on disk`
-            : s.statusNote
-      return { tree: scan.tree, contents, saved, externalChanges, openTabs, activeId, statusNote }
-    }, this.flashNote.bind(this))
-  }
-
-  private reloadFromDisk = async (id: string): Promise<void> => {
-    try {
-      const text = await window.api.readFile(id)
-      this.setState((s) => {
-        const externalChanges = { ...s.externalChanges }
-        delete externalChanges[id]
-        return {
-          contents: { ...s.contents, [id]: text },
-          saved: { ...s.saved, [id]: text },
-          externalChanges
-        }
-      })
-    } catch {
-      // ignore unreadable file
-    }
-  }
-
-  private dismissExternalChange = (id: string): void =>
-    this.setState((s) => {
-      const externalChanges = { ...s.externalChanges }
-      delete externalChanges[id]
-      return { externalChanges }
-    })
-
-  private exportPdf = (): void => {
-    const meta = this.state.activeId ? this.fileMeta(this.state.activeId) : null
-    this.setState({ viewMode: 'read', prefsOpen: false }, () => {
-      setTimeout(() => window.api.exportPdf(meta ? meta.name : 'document'), 220)
     })
   }
 
-  private scrollToHeading = (slug: string): void => this.reader.scrollToId(slug)
+  private showTabMenu = (id: string, e: ReactMouseEvent | ReactKeyboardEvent, keyboard: boolean): void =>
+    this.openMenu(tabMenu(this.menuDeps, id), e, keyboard, 'Tab actions')
+  private showFileMenu = (id: string, e: ReactMouseEvent | ReactKeyboardEvent, keyboard: boolean): void =>
+    this.openMenu(fileMenu(this.menuDeps, id), e, keyboard, 'File actions')
+  private showFolderMenu = (id: string, e: ReactMouseEvent | ReactKeyboardEvent, keyboard: boolean): void =>
+    this.openMenu(folderMenu(this.menuDeps, id), e, keyboard, 'Folder actions')
 
-  private gotoMatch = (id: string, line: number, col: number, len: number): void => {
-    this.openFile(id)
-    this.setState((s) => ({
-      viewMode: 'edit',
-      editorJump: { fileId: id, line, col, len, nonce: (s.editorJump?.nonce ?? 0) + 1 }
-    }))
+  /** A menu hanging from a top-bar button; a second click closes it. */
+  private openAnchoredMenu(anchor: HTMLElement, items: MenuEntry[], label: string, keyboard: boolean): void {
+    if (this.state.menu) return this.setState({ menu: null })
+    const r = anchor.getBoundingClientRect()
+    this.setState({ menu: { x: r.right, y: r.bottom + 6, align: 'end', items, label, keyboard } })
   }
+
+  private showDocMenu = (anchor: HTMLElement, keyboard: boolean): void =>
+    this.openAnchoredMenu(anchor, documentMenu(this.menuDeps), DOC_MENU, keyboard)
+  private showTabList = (anchor: HTMLElement, keyboard: boolean): void =>
+    this.openAnchoredMenu(anchor, tabListMenu(this.menuDeps, (id) => this.nameOf(id)), TAB_LIST, keyboard)
+
+  private readingAnchor: HTMLElement | null = null
+  private toggleReading = (anchor: HTMLElement): void => {
+    this.readingAnchor = anchor
+    this.setState((s) => ({ readingOpen: !s.readingOpen, menu: null }))
+  }
+
+  // ---- links, unsaved state, drag and drop -----------------------------------------
 
   /** A link clicked in the reader: web links go to the browser, relative ones open files. */
   private openLink(href: string): void {
     if (/^https?:\/\//i.test(href)) {
-      window.api.openExternal(href)
+      void window.api.openExternal(href).catch(() => this.host.toast("Couldn't open that link."))
       return
     }
-    this.tryOpenRelative(href)
-  }
-
-  private tryOpenRelative(href: string): void {
     const norm = href.replace(/^\.\//, '').replace(/\\/g, '/').split('#')[0]
-    for (const path of this.index.keys()) {
-      const p = path.replace(/\\/g, '/')
-      if (p === norm || p.endsWith('/' + norm)) {
-        this.openFile(path)
-        return
-      }
-    }
+    const hit = [...this.index.keys()].find((p) => {
+      const q = p.replace(/\\/g, '/')
+      return q === norm || q.endsWith('/' + norm)
+    })
+    if (hit) void this.docs.openFile(hit)
+    else this.host.toast(`Couldn't find ${baseName(norm)} among the open files.`)
   }
 
-  private onKey(e: KeyboardEvent): void {
-    const mod = e.metaKey || e.ctrlKey
-    if (mod) {
-      const k = (e.key || '').toLowerCase()
-      if (k === 'f') {
-        // Inside the editor, let CodeMirror handle find-in-document.
-        if (document.activeElement?.closest('.cm-editor')) return
-        e.preventDefault()
-        this.setState({ activity: 'search', sidebarOpen: true })
-        setTimeout(() => {
-          const input = document.getElementById('smd-search-input') as HTMLInputElement | null
-          input?.focus()
-          input?.select()
-        }, 50)
-        return
-      }
-      if (k === 'b') {
-        e.preventDefault()
-        this.toggleSidebar()
-        return
-      }
-      if (k === '\\') {
-        e.preventDefault()
-        this.toggleOutline()
-        return
-      }
-      if (k === 'd' && e.shiftKey) {
-        e.preventDefault()
-        this.toggleTheme()
-        return
-      }
-      if (k === 's') {
-        e.preventDefault()
-        this.saveActive()
-        return
-      }
-      if (k === 'w') {
-        e.preventDefault()
-        if (this.state.activeId) this.closeTab(this.state.activeId)
-        return
-      }
-      if (k === 'p') {
-        e.preventDefault()
-        this.exportPdf()
-        return
-      }
-    }
-    if (e.key === 'Escape') {
-      if (this.state.prefsOpen) this.setState({ prefsOpen: false })
-      else if (this.state.confirm) this.cancelConfirm()
-      else if (this.state.closePrompt) this.cancelClose()
-    }
+  private reportUnsaved(): void {
+    const has = unsavedIds(this.state.contents, this.state.saved).length > 0
+    if (has === this.lastReportedUnsaved) return
+    this.lastReportedUnsaved = has
+    void window.api.setUnsaved(has).catch(() => undefined)
   }
 
-  // ---- render --------------------------------------------------------------
+  private closeWindow = async (save: boolean): Promise<void> => {
+    this.setState({ dialog: null })
+    if (save && !(await this.docs.saveAll())) return
+    await this.recovery.clear()
+    void window.api.win.forceClose()
+  }
+
+  // ---- small handlers passed to components -----------------------------------------
+
+  private onEditorChange = (value: string): void =>
+    this.setState((s) => (s.activeId ? { contents: { ...s.contents, [s.activeId]: value } } : null))
+  private setActive = (id: string): void => this.setState((s) => ({ activeId: id, newPaths: without(s.newPaths, id) }))
+  private openFromSidebar = (id: string): void => {
+    void this.docs.openFile(id)
+    if (this.state.compact) this.setState({ sidebarPeek: false })
+  }
+  private gotoMatch = (id: string, line: number, col: number, len: number): void => {
+    void this.docs.openFile(id)
+    this.setState((s) => ({
+      viewMode: s.viewMode === 'read' ? 'split' : s.viewMode,
+      editorJump: { fileId: id, line, col, len, nonce: (s.editorJump?.nonce ?? 0) + 1 }
+    }))
+  }
+  private closeTab = (id: string): void => this.docs.requestClose([id])
+  private newDoc = (): void => void this.docs.newDocument()
+  private quickOpen = (): void => this.view.openPalette('')
+  private openSettings = (): void => this.view.openSettings('appearance')
+  private openShortcuts = (): void => this.view.openSettings('shortcuts')
+  /** Outline click: the reader scrolls to the heading; Edit view (no reader)
+   *  moves the editor to the heading's line instead. */
+  private scrollToHeading = (slug: string): void => {
+    const s = this.state
+    const id = s.activeId
+    if (s.viewMode !== 'edit' || !id) return this.reader.scrollToId(slug)
+    const heading = computeOutline(s.contents[id] ?? '').find((o) => o.slug === slug)
+    if (!heading) return
+    this.setState((st) => ({
+      editorJump: { fileId: id, line: heading.line, col: 0, len: 0, nonce: (st.editorJump?.nonce ?? 0) + 1 }
+    }))
+  }
+  private validateName = (path: string, name: string, isFolder: boolean): string | null =>
+    this.files.validateName(path, name, isFolder)
+  private commitRename = (path: string, name: string, isFolder: boolean): void =>
+    void this.files.commitRename(path, name, isFolder)
+  private cancelRename = (): void => this.setState({ renaming: null })
+  private setSearch = (searchQuery: string): void => this.setState({ searchQuery })
+  private clearRecents = (): void => this.setState({ recents: [] })
+  private forgetRecent = (id: string): void => this.setState((s) => ({ recents: s.recents.filter((r) => r !== id) }))
+
+  // ---- render --------------------------------------------------------------------
+
+  private paletteCommands(): PaletteCommand[] {
+    return COMMANDS.filter((c) => !c.hideInPalette && this.isAvailable(c.id)).map((c) => ({
+      id: c.id,
+      label: commandLabel(c, this.words),
+      group: c.group,
+      keywords: c.keywords ?? '',
+      shortcut: c.shortcuts?.[0] ? this.hint(c.shortcuts[0]) : null
+    }))
+  }
+
+  private renderSidebar(overlay: boolean) {
+    const s = this.state
+    const tree = this.memo(
+      'tree',
+      [s.tree, s.looseFiles, s.expanded, s.pinned, s.activeId, s.newPaths, s.root, s.emptyFolders],
+      () => buildTree(s, isAgentInstructionFile)
+    )
+    const treeProps = this.memo('treeProps', [tree, s.root, s.renaming, s.restored], () => ({
+      tree,
+      hasFolder: !!s.root || tree.folders.length > 0,
+      ready: s.restored,
+      renaming: s.renaming,
+      validateName: this.validateName,
+      onRenameCommit: this.commitRename,
+      onRenameCancel: this.cancelRename,
+      onToggleFolder: this.files.toggleFolder,
+      onOpenFile: this.openFromSidebar,
+      onOpenAll: this.files.openAllInFolder,
+      onPinFile: this.files.togglePin,
+      onOpenFolder: this.files.openFolderDialog,
+      onFileContext: this.showFileMenu,
+      onFolderContext: this.showFolderMenu
+    }))
+    const searchResult =
+      s.activity === 'search'
+        ? this.memo('search', [s.searchQuery, s.tree, s.looseFiles, s.contents], () =>
+            searchAll(s.searchQuery, searchableFiles(s.tree, s.looseFiles, s.contents))
+          )
+        : NO_SEARCH
+    const ref = (id: string): NamedFileRef => {
+      const meta = this.index.get(id)
+      return { id, name: meta?.name ?? baseName(id), folder: displayDir(meta?.dir ?? dirOf(id), s.root, s.rootName) }
+    }
+    const pinned = this.memo('pinnedRefs', [s.pinned, this.index], () => s.pinned.map(ref))
+    const recent = this.memo('recentRefs', [s.recents, this.index], () => s.recents.map(ref))
+    return (
+      <Sidebar
+        activity={s.activity}
+        overlay={overlay}
+        workspaceName={s.rootName}
+        resolvedTheme={resolveTheme(s.theme, s.systemDark)}
+        hint={this.hint}
+        onActivity={this.view.setActivity}
+        onNewDocument={this.newDoc}
+        onQuickOpen={this.quickOpen}
+        onSettings={this.openSettings}
+        onToggleTheme={this.view.toggleTheme}
+        onShortcuts={this.openShortcuts}
+        tree={treeProps}
+        searchQuery={s.searchQuery}
+        searchResult={searchResult}
+        onSearchInput={this.setSearch}
+        onGotoMatch={this.gotoMatch}
+        pinned={pinned}
+        recent={recent}
+        onUnpin={this.files.togglePin}
+        onForgetRecent={this.forgetRecent}
+        onClearRecents={this.clearRecents}
+      />
+    )
+  }
+
+  private renderDocument(activeId: string) {
+    const s = this.state
+    const showEditor = s.viewMode !== 'read'
+    const showReader = s.viewMode !== 'edit'
+    const name = this.nameOf(activeId)
+    return (
+      <div className="smd-workspace">
+        <div className="smd-docarea">
+          {s.externalChanges[activeId] && (
+            <div className="smd-conflict" role="alert">
+              <InfoIcon size={16} />
+              <span>This file changed on disk while you had unsaved edits.</span>
+              <button
+                type="button"
+                className="smd-btn smd-btn--sm"
+                onClick={() => void this.docs.reloadFromDisk(activeId, { confirmed: true })}
+              >
+                Reload from disk
+              </button>
+              <button
+                type="button"
+                className="smd-btn smd-btn--sm smd-btn--ghost"
+                onClick={() => this.docs.keepMine(activeId)}
+              >
+                Keep mine
+              </button>
+            </div>
+          )}
+          <div className={'smd-panes' + (s.viewMode === 'split' ? ' smd-panes--split' : '')}>
+            {showEditor && (
+              <div className="smd-editor-pane">
+                {/* Format bar slot (Edit/Split only), wired at integration. */}
+                <div className="smd-editor-host">
+                  <Suspense fallback={null}>
+                    <CodeEditor
+                      key={activeId}
+                      value={s.contents[activeId] ?? ''}
+                      onChange={this.onEditorChange}
+                      isDark={resolveTheme(s.theme, s.systemDark) === 'dark'}
+                      jump={s.editorJump && s.editorJump.fileId === activeId ? s.editorJump : null}
+                      onReady={this.onEditorReady}
+                    />
+                  </Suspense>
+                </div>
+              </div>
+            )}
+            {showReader && (
+              // Positioned pane: the find bar and change bar float inside it.
+              <div className="smd-reader-pane">
+                <div
+                  ref={this.setReaderEl}
+                  className="smd-reader"
+                  role="article"
+                  tabIndex={0}
+                  aria-label={`${name}, rendered`}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+        {this.renderOutline()}
+      </div>
+    )
+  }
+
+  private renderOutline() {
+    const s = this.state
+    if (!s.outlineOpen || s.narrow || s.focusMode || !s.activeId) return null
+    const md = s.contents[s.activeId] ?? ''
+    const outline = this.memo<OutlineItem[]>('outline', [md], () =>
+      computeOutline(md).map((o, i) => ({ key: i, slug: o.slug, text: o.text, level: o.level }))
+    )
+    return <Outline outline={outline} activeSlug={s.activeSlug} onJump={this.scrollToHeading} />
+  }
+
+  private renderStatus() {
+    const s = this.state
+    const id = s.activeId
+    if (!s.showStatusBar || s.focusMode || !id) return null
+    const md = id ? (s.contents[id] ?? '') : ''
+    const st = id ? computeStats(md) : { words: 0, minutes: 0 }
+    const meta = id ? this.index.get(id) : undefined
+    const saveState = !id ? null : isUntitled(id) ? 'new' : isDirtyIn(s.contents, s.saved, id) ? 'unsaved' : 'saved'
+    const folder = id && !isUntitled(id) ? (meta?.folderName ?? baseName(dirOf(id))) : ''
+    return (
+      <StatusBar
+        folder={folder}
+        file={id ? this.nameOf(id) : ''}
+        saveState={saveState}
+        words={st.words}
+        minutes={st.minutes}
+      />
+    )
+  }
 
   render() {
     const s = this.state
-    const resolved = resolveTheme(s.theme)
-    const isDark = resolved === 'dark'
-    const activeId = s.activeId
-    const af = activeId ? this.fileMeta(activeId) : null
-    const hasTabs = s.openTabs.length > 0
-    const activeMd = this.contentOf(activeId)
-
-    // Build the file index from the workspace tree + individually-opened files.
-    const index = this.memo('index', [s.tree, s.looseFiles], () => {
-      const map = new Map<string, FileMeta>()
-      for (const folder of s.tree) {
-        for (const f of folder.files) map.set(f.path, { name: f.name, folderName: folder.name, dir: f.dir })
-      }
-      for (const lf of s.looseFiles) {
-        if (!map.has(lf.path)) map.set(lf.path, { name: lf.name, folderName: baseName(lf.dir), dir: lf.dir })
-      }
-      return map
-    })
-    this.index = index
-
-    // Merge workspace folders with loose files, grouped by directory (VS Code-like).
-    const folders = this.memo('folders', [s.tree, s.looseFiles, s.expanded, s.pinned, activeId], () => {
-      const pinnedSet = new Set(s.pinned)
-      const fileItem = (path: string, name: string): FolderItem['files'][number] => ({
-        id: path,
-        name,
-        active: path === activeId,
-        pinned: pinnedSet.has(path)
-      })
-      const folderById = new Map<string, FolderItem>()
-      const folderOrder: string[] = []
-      for (const folder of s.tree) {
-        folderById.set(folder.id, {
-          id: folder.id,
-          name: folder.name,
-          expanded: s.expanded[folder.id] ?? true,
-          files: folder.files.map((f) => fileItem(f.path, f.name))
-        })
-        folderOrder.push(folder.id)
-      }
-      const present = new Map<string, Set<string>>()
-      for (const [gid, group] of folderById) present.set(gid, new Set(group.files.map((f) => f.id)))
-      for (const lf of s.looseFiles) {
-        let group = folderById.get(lf.dir)
-        if (!group) {
-          group = { id: lf.dir, name: baseName(lf.dir), expanded: s.expanded[lf.dir] ?? true, files: [] }
-          folderById.set(lf.dir, group)
-          folderOrder.push(lf.dir)
-          present.set(lf.dir, new Set())
-        }
-        const ids = present.get(lf.dir)!
-        if (!ids.has(lf.path)) {
-          group.files.push(fileItem(lf.path, lf.name))
-          ids.add(lf.path)
-        }
-      }
-      return folderOrder.map((id) => folderById.get(id)!)
-    })
-
-    const tabs: TabItem[] = s.openTabs.map((id) => {
-      const meta = this.fileMeta(id)
-      return { id, name: meta.name, active: id === activeId, pinned: s.pinned.includes(id), dirty: this.isDirty(id) }
-    })
-
-    const searchResult: SearchResult =
-      s.activity === 'search'
-        ? this.memo('search', [s.searchQuery, s.tree, s.looseFiles, s.contents], () => {
-            const files: SearchableFile[] = []
-            const seen = new Set<string>()
-            for (const folder of s.tree) {
-              for (const f of folder.files) {
-                seen.add(f.path)
-                files.push({ id: f.path, name: f.name, folderName: folder.name, content: s.contents[f.path] ?? '' })
-              }
-            }
-            for (const lf of s.looseFiles) {
-              if (!seen.has(lf.path)) {
-                files.push({ id: lf.path, name: lf.name, folderName: baseName(lf.dir), content: s.contents[lf.path] ?? '' })
-              }
-            }
-            return searchAll(s.searchQuery, files)
-          })
-        : NO_SEARCH
-
-    const outline = this.memo<OutlineItem[]>('outline', [activeMd], () =>
-      computeOutline(activeMd).map((o, i) => ({ key: i, slug: o.slug, text: o.text, level: o.level }))
+    const resolved = resolveTheme(s.theme, s.systemDark)
+    this.index = this.memo('index', [s.tree, s.looseFiles], () => buildIndex(s))
+    const sidebarVisible = !s.focusMode && (s.compact ? s.sidebarPeek : s.sidebarOpen)
+    const tabs = buildTabs(s, (id) => this.nameOf(id))
+    const recentFolders = this.memo('recentFolders', [s.recentFolders], () =>
+      s.recentFolders.map((path) => ({ path, name: baseName(path), parent: dirOf(path).replace(/\\/g, '/') }))
     )
-    const st = activeId ? computeStats(activeMd) : { words: 0, minutes: 0, lines: 0, headings: 0 }
-
-    const pinned = this.memo('pinnedRefs', [s.pinned, index], () => s.pinned.map((id) => this.fileMeta(id)))
-    const recent = this.memo('recentRefs', [s.recents, index], () => s.recents.map((id) => this.fileMeta(id)))
-
-    const breadcrumb = af ? (af.folder ? af.folder + '  /  ' + af.name : af.name) : ''
-    const dirty = activeId ? this.isDirty(activeId) : false
-    const unsavedList = s.closePrompt ? this.unsavedFiles() : []
-    const modeLabel = s.viewMode === 'read' ? 'Reading' : s.viewMode === 'split' ? 'Split' : 'Editing'
-    const showEditor = s.viewMode === 'edit' || s.viewMode === 'split'
-    const showReader = s.viewMode === 'read' || s.viewMode === 'split'
-    const showOutline = s.outlineOpen && hasTabs
-    const titleName = af ? af.name : 'No document'
-    const statusLeft = s.root ? (af ? breadcrumb : s.rootName) : 'Open a folder to begin'
+    const rootClass = [
+      'smd-root',
+      `smd-${resolved}`,
+      `smd-platform-${this.platform}`,
+      s.reduceMotion ? 'smd-reduce-motion' : '',
+      s.focusMode ? 'smd-focus' : '',
+      sidebarVisible && !s.compact ? '' : 'smd-no-sidebar'
+    ]
+      .filter(Boolean)
+      .join(' ')
 
     return (
       <div
         ref={this.rootRef}
-        className={'smd-root smd-' + resolved}
-        onDragEnter={this.onDragEnter}
-        onDragOver={this.onDragOver}
-        onDragLeave={this.onDragLeave}
-        onDrop={this.onDrop}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          background: 'var(--bg)',
-          color: 'var(--fg)',
-          fontFamily: "'Helvetica Neue',Helvetica,Arial,sans-serif",
-          fontSize: 13,
-          WebkitFontSmoothing: 'antialiased',
-          overflow: 'hidden'
-        }}
+        className={rootClass}
+        onDragEnter={this.drop.onDragEnter}
+        onDragOver={this.drop.onDragOver}
+        onDragLeave={this.drop.onDragLeave}
+        onDrop={this.drop.onDrop}
       >
-        <TitleBar
-          titleName={titleName}
-          dirty={dirty}
-          isMaximized={s.isMaximized}
-          onMinimize={() => window.api.win.minimize()}
-          onMaximize={() => window.api.win.maximizeToggle()}
-          onClose={() => window.api.win.close()}
-        />
-
-        <div className="smd-body" style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-          <ActivityBar
-            activity={s.activity}
-            sidebarOpen={s.sidebarOpen}
-            isDark={isDark}
-            onFiles={() => this.setActivity('files')}
-            onSearch={() => this.setActivity('search')}
-            onPinned={() => this.setActivity('pinned')}
-            onToggleTheme={this.toggleTheme}
+        {sidebarVisible && s.compact && (
+          <div className="smd-sidebar-scrim" onClick={() => this.setState({ sidebarPeek: false })} />
+        )}
+        {sidebarVisible && this.renderSidebar(s.compact)}
+        <div className="smd-main">
+          <TopBar
+            platform={this.platform}
+            tabs={tabs}
+            hasDocument={!!s.activeId}
+            sidebarVisible={sidebarVisible && !s.compact}
+            viewMode={s.viewMode}
+            outlineOpen={s.outlineOpen && !s.focusMode}
+            outlineAvailable={!s.narrow}
+            readingOpen={s.readingOpen}
+            docMenuOpen={s.menu?.label === DOC_MENU}
+            tabListOpen={s.menu?.label === TAB_LIST}
+            isMaximized={s.isMaximized}
+            hint={this.hint}
+            onShowSidebar={this.view.showSidebar}
+            onSelectTab={this.setActive}
+            onCloseTab={this.closeTab}
+            onTabContext={this.showTabMenu}
+            onNewDocument={this.newDoc}
+            onTabList={this.showTabList}
+            onSetView={this.view.setView}
+            onToggleOutline={this.view.toggleOutline}
+            onToggleReading={this.toggleReading}
+            onDocMenu={this.showDocMenu}
           />
-
-          {s.sidebarOpen && (
-            <Sidebar
-              activity={s.activity}
-              hasFolder={!!s.root || folders.length > 0}
-              onOpenFolder={this.openFolderDialog}
-              onOpenFiles={this.openFilesDialog}
-              folders={folders}
-              onToggleFolder={this.toggleFolder}
-              onOpenFile={this.openFile}
-              onOpenAll={this.openAllInFolder}
-              onPinFile={this.togglePin}
-              onFileContext={this.showFileMenu}
-              onFolderContext={this.showFolderMenu}
-              searchQuery={s.searchQuery}
-              searchResult={searchResult}
-              onSearchInput={this.onSearch}
-              onOpenGroup={this.openFile}
-              onGotoMatch={this.gotoMatch}
-              pinned={pinned}
-              recent={recent}
-              onUnpin={this.togglePin}
+          {s.activeId ? (
+            this.renderDocument(s.activeId)
+          ) : !s.restored ? (
+            // Restoring the session: an empty page, not a Welcome that flashes away.
+            <div className="smd-workspace" aria-busy="true" />
+          ) : (
+            <Welcome
+              hint={this.hint}
+              recentFiles={this.memo('welcomeRecents', [s.recents, this.index, s.root], () =>
+                s.recents.map((id) => ({
+                  id,
+                  name: this.index.get(id)?.name ?? baseName(id),
+                  folder: displayDir(dirOf(id), s.root, s.rootName)
+                }))
+              )}
+              recentFolders={recentFolders}
+              onNewDocument={this.newDoc}
+              onOpenFile={() => void this.files.openFilesDialog()}
+              onOpenFolder={() => void this.files.openFolderDialog()}
+              onPasteFromAi={() => void this.docs.pasteFromAi()}
+              onOpenRecentFile={(id) => void this.docs.openFile(id)}
+              onOpenRecentFolder={(p) => void this.files.openRecentFolder(p)}
+              onClearRecents={this.clearRecents}
             />
           )}
-
-          <div
-            className="smd-center"
-            style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, background: 'var(--bg)' }}
-          >
-            <Tabs tabs={tabs} onSelect={this.setActive} onClose={this.closeTab} />
-
-            {hasTabs ? (
-              <>
-                <Toolbar
-                  breadcrumb={breadcrumb}
-                  viewMode={s.viewMode}
-                  onSetView={this.setView}
-                  onExport={this.exportPdf}
-                  outlineOpen={s.outlineOpen}
-                  onToggleOutline={this.toggleOutline}
-                  prefsOpen={s.prefsOpen}
-                  onTogglePrefs={this.togglePrefs}
-                  accent={s.accent}
-                  readingFont={s.readingFont}
-                  readingWidth={s.readingWidth}
-                  onAccent={this.setAccent}
-                  onFont={this.setFont}
-                  onWidth={this.setWidth}
-                />
-                {activeId && s.externalChanges[activeId] && (
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 12,
-                      padding: '8px 14px',
-                      background: 'var(--accent-soft)',
-                      borderBottom: '1px solid var(--border)',
-                      fontSize: 12.5,
-                      color: 'var(--fg)'
-                    }}
-                  >
-                    <span style={{ flex: 1 }}>This file changed on disk while you had unsaved edits.</span>
-                    <button
-                      className="smd-ghostbtn smd-ghostbtn--sm"
-                      onClick={() => this.reloadFromDisk(activeId)}
-                    >
-                      Reload from disk
-                    </button>
-                    <button
-                      className="smd-ghostbtn smd-ghostbtn--sm"
-                      onClick={() => this.dismissExternalChange(activeId)}
-                    >
-                      Keep mine
-                    </button>
-                  </div>
-                )}
-                <div style={{ flex: 1, display: 'flex', minHeight: 0, minWidth: 0 }}>
-                  {showEditor && activeId && (
-                    <div
-                      style={{
-                        width: s.viewMode === 'split' ? '50%' : '100%',
-                        height: '100%',
-                        flex: 'none',
-                        minWidth: 0,
-                        borderRight: s.viewMode === 'split' ? '1px solid var(--border)' : 'none',
-                        background: 'var(--bg)'
-                      }}
-                    >
-                      <Suspense fallback={null}>
-                        <CodeEditor
-                          key={activeId}
-                          value={this.contentOf(activeId)}
-                          onChange={this.onEditorChange}
-                          isDark={isDark}
-                          jump={s.editorJump && s.editorJump.fileId === activeId ? s.editorJump : null}
-                        />
-                      </Suspense>
-                    </div>
-                  )}
-                  {showReader && (
-                    <div
-                      ref={this.setReaderEl}
-                      className="smd-reader"
-                      role="article"
-                      tabIndex={0}
-                      aria-label={af ? `${af.name} — rendered document` : 'Rendered document'}
-                      style={{ flex: 1, minWidth: 0, overflowY: 'auto', position: 'relative', background: 'var(--bg)' }}
-                    />
-                  )}
-                </div>
-              </>
-            ) : (
-              <EmptyState onOpenFolder={this.openFolderDialog} onOpenFiles={this.openFilesDialog} />
-            )}
-          </div>
-
-          {showOutline && <Outline outline={outline} onJump={this.scrollToHeading} />}
+          {this.renderStatus()}
         </div>
-
-        <StatusBar
-          statusLeft={statusLeft}
-          dirty={dirty}
-          words={st.words}
-          minutes={st.minutes}
-          lines={st.lines}
-          modeLabel={modeLabel}
+        <AppOverlays
+          state={s}
+          platform={this.platform}
+          readingAnchor={this.readingAnchor}
+          nameOf={(id) => this.nameOf(id)}
+          quickOpen={() => buildQuickOpen(s, this.index, isAgentInstructionFile)}
+          paletteCommands={() => this.paletteCommands()}
+          recentFolders={recentFolders}
+          host={this.host}
+          docs={this.docs}
+          files={this.files}
+          runCommand={this.runCommand}
+          hasCommand={this.hasCommand}
+          onRestore={() => void restoreRecovered(this.host, this.recovery)}
+          onDiscard={this.discardRecovered}
+          onCloseWindow={(save) => void this.closeWindow(save)}
         />
-
-        {s.prefsOpen && (
-          <div
-            onClick={() => this.setState({ prefsOpen: false })}
-            style={{ position: 'fixed', inset: 0, zIndex: 25 }}
-          />
-        )}
-
-        {s.closePrompt && (
-          <div
-            style={{
-              position: 'fixed',
-              inset: 0,
-              zIndex: 60,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'rgba(0,0,0,.45)'
-            }}
-          >
-            <div
-              className="smd-pop"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="smd-closeprompt-title"
-              style={{
-                width: 400,
-                maxWidth: 'calc(100vw - 40px)',
-                background: 'var(--bg)',
-                border: '1px solid var(--border-strong)',
-                borderRadius: 12,
-                boxShadow: '0 24px 70px rgba(0,0,0,.4)',
-                padding: '20px 22px'
-              }}
-            >
-              <div
-                id="smd-closeprompt-title"
-                style={{ fontSize: 15, fontWeight: 650, color: 'var(--fg)', marginBottom: 8 }}
-              >
-                Save changes before closing?
-              </div>
-              <div style={{ fontSize: 13, color: 'var(--fg-muted)', lineHeight: 1.5, marginBottom: 6 }}>
-                {unsavedList.length} file{unsavedList.length === 1 ? ' has' : 's have'} unsaved changes.
-              </div>
-              <div style={{ maxHeight: 120, overflowY: 'auto', margin: '0 0 16px' }}>
-                {unsavedList.slice(0, 8).map((id) => (
-                  <div
-                    key={id}
-                    style={{
-                      fontSize: 12.5,
-                      color: 'var(--fg)',
-                      padding: '2px 0',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap'
-                    }}
-                  >
-                    • {this.fileMeta(id).name}
-                  </div>
-                ))}
-                {unsavedList.length > 8 && (
-                  <div style={{ fontSize: 12, color: 'var(--fg-faint)', padding: '2px 0' }}>
-                    …and {unsavedList.length - 8} more
-                  </div>
-                )}
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                <button className="smd-ghostbtn" onClick={this.cancelClose}>
-                  Cancel
-                </button>
-                <button className="smd-ghostbtn" onClick={this.confirmDiscardAndClose}>
-                  Discard &amp; close
-                </button>
-                <button className="smd-primarybtn" onClick={this.confirmSaveAndClose} autoFocus>
-                  Save all &amp; close
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {s.statusNote && (
-          <div
-            className="smd-pop"
-            role="status"
-            aria-live="polite"
-            style={{
-              position: 'fixed',
-              bottom: 40,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              zIndex: 40,
-              background: 'var(--bg)',
-              border: '1px solid var(--border-strong)',
-              borderRadius: 9,
-              boxShadow: '0 10px 30px rgba(0,0,0,.18)',
-              padding: '9px 16px',
-              fontSize: 12.5,
-              color: 'var(--fg)'
-            }}
-          >
-            {s.statusNote}
-          </div>
-        )}
-
-        {s.dragOver && (
-          <div
-            style={{
-              position: 'fixed',
-              inset: 0,
-              zIndex: 90,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'color-mix(in oklch, var(--bg) 72%, transparent)',
-              pointerEvents: 'none'
-            }}
-          >
-            <div
-              className="smd-pop"
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 14,
-                padding: '34px 48px',
-                border: '2px dashed var(--accent)',
-                borderRadius: 16,
-                background: 'var(--bg-elev)',
-                boxShadow: '0 20px 60px rgba(0,0,0,.28)'
-              }}
-            >
-              <FolderPlusIcon size={36} style={{ color: 'var(--accent)' }} />
-              <div style={{ fontSize: 15, fontWeight: 650, color: 'var(--fg)' }}>Drop to open</div>
-              <div style={{ fontSize: 12.5, color: 'var(--fg-muted)' }}>Markdown files or a folder</div>
-            </div>
-          </div>
-        )}
-
-        {s.confirm && (
-          <div
-            onClick={this.cancelConfirm}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              zIndex: 70,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'rgba(0,0,0,.45)'
-            }}
-          >
-            <div
-              className="smd-pop"
-              role="dialog"
-              aria-modal="true"
-              aria-label={s.confirm.title}
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                width: 380,
-                maxWidth: 'calc(100vw - 40px)',
-                background: 'var(--bg)',
-                border: '1px solid var(--border-strong)',
-                borderRadius: 12,
-                boxShadow: '0 24px 70px rgba(0,0,0,.4)',
-                padding: '20px 22px'
-              }}
-            >
-              <div style={{ fontSize: 15, fontWeight: 650, color: 'var(--fg)', marginBottom: 8 }}>
-                {s.confirm.title}
-              </div>
-              <div style={{ fontSize: 13, color: 'var(--fg-muted)', lineHeight: 1.5, marginBottom: 18 }}>
-                {s.confirm.message}
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                <button className="smd-ghostbtn" onClick={this.cancelConfirm}>
-                  Cancel
-                </button>
-                <button
-                  className={'smd-primarybtn' + (s.confirm.danger ? ' smd-dangerbtn' : '')}
-                  onClick={this.runConfirm}
-                  autoFocus
-                >
-                  {s.confirm.confirmLabel}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {s.menu && <ContextMenu menu={s.menu} onClose={this.closeMenu} />}
+        {s.menu && <ContextMenu menu={s.menu} onClose={() => this.setState({ menu: null })} />}
       </div>
     )
   }

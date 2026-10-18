@@ -5,6 +5,8 @@ export interface OutlineEntry {
   level: number
   text: string
   slug: string
+  /** 0-based source line, so Edit view can jump to the heading. */
+  line: number
 }
 
 export function slugify(text: string): string {
@@ -35,7 +37,8 @@ function scanOutline(md: string): OutlineEntry[] {
   let inFence = false
   const out: OutlineEntry[] = []
   const used: Record<string, number> = {}
-  for (const ln of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i]
     if (/^\s*(```|~~~)/.test(ln)) {
       inFence = !inFence
       continue
@@ -49,7 +52,7 @@ function scanOutline(md: string): OutlineEntry[] {
       let k = 1
       while (used[slug]) slug = base + '-' + k++
       used[slug] = 1
-      out.push({ level: m[1].length, text, slug })
+      out.push({ level: m[1].length, text, slug, line: i })
     }
   }
   return out

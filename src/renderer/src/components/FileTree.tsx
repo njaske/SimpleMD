@@ -1,193 +1,334 @@
-import { memo, type MouseEvent as ReactMouseEvent } from 'react'
-import type { FolderItem } from '@/state/viewmodel'
+import { memo, useState } from 'react'
+import type { KeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
+import type { FileItem, FolderItem, TreeModel } from '@/state/viewmodel'
+import type { RenameState } from '@/app/types'
 import {
   BookmarkFill,
   BookmarkIcon,
   ChevronRight,
-  FileIcon,
-  FilePlusIcon,
+  FileTextIcon,
   FolderIcon,
-  OpenAllIcon
+  OpenAllIcon,
+  SparkIcon
 } from '@/lib/icons'
-import { activateOnKey } from '@/lib/a11y'
+import InlineRename from './InlineRename'
 
-interface Props {
-  folders: FolderItem[]
+type ContextHandler = (id: string, e: ReactMouseEvent | KeyboardEvent, keyboard: boolean) => void
+
+export interface FileTreeProps {
+  tree: TreeModel
   hasFolder: boolean
+  /** The session has been restored; until then the empty state stays hidden. */
+  ready: boolean
+  renaming: RenameState | null
+  validateName: (path: string, name: string, isFolder: boolean) => string | null
+  onRenameCommit: (path: string, name: string, isFolder: boolean) => void
+  onRenameCancel: () => void
   onToggleFolder: (id: string) => void
   onOpenFile: (id: string) => void
   onOpenAll: (id: string) => void
   onPinFile: (id: string) => void
   onOpenFolder: () => void
-  onOpenFiles: () => void
-  onFileContext: (id: string, e: ReactMouseEvent) => void
-  onFolderContext: (id: string, e: ReactMouseEvent) => void
+  onFileContext: ContextHandler
+  onFolderContext: ContextHandler
+}
+
+const ERROR_ID = 'smd-rename-error'
+
+function RenameRow({
+  initial,
+  path,
+  isFolder,
+  validate,
+  onCommit,
+  onCancel
+}: {
+  initial: string
+  path: string
+  isFolder: boolean
+  validate: FileTreeProps['validateName']
+  onCommit: FileTreeProps['onRenameCommit']
+  onCancel: () => void
+}) {
+  const [error, setError] = useState<string | null>(null)
+  return (
+    <>
+      <div className={(isFolder ? 'smd-folder' : 'smd-row') + ' smd-row--rename'}>
+        {isFolder ? (
+          <FolderIcon size={14} className="smd-row-icon" />
+        ) : (
+          <FileTextIcon size={15} className="smd-row-icon" />
+        )}
+        <InlineRename
+          initial={initial}
+          label={isFolder ? 'Folder name' : 'File name'}
+          errorId={ERROR_ID}
+          validate={(name) => validate(path, name, isFolder)}
+          onError={setError}
+          onCommit={(name) => onCommit(path, name, isFolder)}
+          onCancel={onCancel}
+        />
+      </div>
+      {error && (
+        <div id={ERROR_ID} className="smd-rename-error" role="alert">
+          {error}
+        </div>
+      )}
+    </>
+  )
 }
 
 interface RowProps {
-  id: string
-  name: string
-  active: boolean
-  pinned: boolean
+  file: FileItem
+  /** This row is the tree's tab stop (roving focus). */
+  tabbable: boolean
+  depthClass?: string
   onOpenFile: (id: string) => void
   onPinFile: (id: string) => void
-  onFileContext: (id: string, e: ReactMouseEvent) => void
+  onFileContext: ContextHandler
 }
 
-// One row per file, memoized on primitives so switching the active document
-// re-renders only the two rows whose state changed, not thousands.
-const FileRow = memo(function FileRow({ id, name, active, pinned, onOpenFile, onPinFile, onFileContext }: RowProps) {
+// One row per file, memoized on its item so switching documents re-renders only
+// the rows whose state changed, not thousands.
+const FileRow = memo(function FileRow({ file, tabbable, depthClass, onOpenFile, onPinFile, onFileContext }: RowProps) {
+  const dot = file.name.lastIndexOf('.')
+  const stem = dot > 0 ? file.name.slice(0, dot) : file.name
+  const ext = dot > 0 ? file.name.slice(dot) : ''
   return (
     <div
-      className={'smd-row' + (active ? ' is-active' : '')}
-      role="button"
-      tabIndex={0}
-      aria-label={`Open ${name}`}
-      aria-current={active ? 'true' : undefined}
-      onClick={() => onOpenFile(id)}
-      onKeyDown={activateOnKey(() => onOpenFile(id))}
-      onContextMenu={(e) => onFileContext(id, e)}
-      title={id}
+      className={'smd-row' + (file.active ? ' is-active' : '') + (depthClass ? ` ${depthClass}` : '')}
+      role="treeitem"
+      tabIndex={tabbable ? 0 : -1}
+      data-path={file.id}
+      aria-selected={file.active}
+      aria-label={`${file.name}${file.isNew ? ', new' : ''}${file.pinned ? ', pinned' : ''}`}
+      title={file.id}
+      onClick={() => onOpenFile(file.id)}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        onFileContext(file.id, e, false)
+      }}
     >
-      <FileIcon size={14} sw={1.5} style={{ flex: 'none', color: active ? 'var(--accent)' : 'var(--fg-faint)' }} />
-      <span
-        style={{
-          flex: 1,
-          fontSize: 12.5,
-          color: active ? 'var(--fg)' : 'var(--fg-muted)',
-          fontWeight: active ? 600 : 400,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap'
-        }}
-      >
-        {name}
+      {file.isAgent ? (
+        <SparkIcon size={15} className="smd-row-icon smd-row-icon--agent" />
+      ) : (
+        <FileTextIcon size={15} className="smd-row-icon" />
+      )}
+      <span className="smd-row-name">
+        {stem}
+        <span className="smd-row-ext">{ext}</span>
       </span>
-      {pinned && <BookmarkFill size={12} style={{ flex: 'none', color: 'var(--accent)' }} />}
+      {file.isNew && <span className="smd-new-dot" title="New since you opened the folder" />}
+      {file.pinned && <BookmarkFill size={11} className="smd-row-pin" />}
       <button
-        className="smd-rowact"
-        aria-label={pinned ? `Unpin ${name}` : `Pin ${name}`}
-        title={pinned ? 'Unpin' : 'Pin'}
+        type="button"
+        tabIndex={-1}
+        className="smd-iconbtn smd-iconbtn--sm"
+        aria-label={file.pinned ? `Unpin ${file.name}` : `Pin ${file.name}`}
+        title={file.pinned ? 'Unpin' : 'Pin'}
         onClick={(e) => {
           e.stopPropagation()
-          onPinFile(id)
+          onPinFile(file.id)
         }}
       >
-        <BookmarkIcon size={13} />
+        {file.pinned ? <BookmarkFill size={13} /> : <BookmarkIcon size={14} />}
       </button>
     </div>
   )
 })
 
-function FileTree({
-  folders,
-  hasFolder,
-  onToggleFolder,
-  onOpenFile,
-  onOpenAll,
-  onPinFile,
-  onOpenFolder,
-  onOpenFiles,
-  onFileContext,
-  onFolderContext
-}: Props) {
-  if (!hasFolder) {
-    return (
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+function FolderName({ name }: { name: string }) {
+  const parts = name.split(/\s+\/\s+/)
+  const last = parts.pop()
+  return (
+    <span className="smd-folder-name">
+      {parts.map((p) => (
+        <span key={p} className="smd-crumb">
+          {p} /{' '}
+        </span>
+      ))}
+      {last}
+    </span>
+  )
+}
+
+/** Arrow-key navigation over the visible tree items (WAI-ARIA tree pattern). */
+function onTreeKey(e: KeyboardEvent<HTMLDivElement>, p: FileTreeProps): void {
+  const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="treeitem"]'))
+  const el = document.activeElement as HTMLElement | null
+  const i = el ? items.indexOf(el) : -1
+  const path = el?.dataset.path
+  const folder = el?.dataset.folder
+  const focus = (n: number): void => items[Math.max(0, Math.min(items.length - 1, n))]?.focus()
+  const actions: Record<string, () => void> = {
+    ArrowDown: () => focus(i + 1),
+    ArrowUp: () => focus(i - 1),
+    Home: () => focus(0),
+    End: () => focus(items.length - 1),
+    ArrowRight: () => {
+      if (folder && el?.getAttribute('aria-expanded') === 'false') p.onToggleFolder(folder)
+      else focus(i + 1)
+    },
+    ArrowLeft: () => {
+      if (folder && el?.getAttribute('aria-expanded') === 'true') p.onToggleFolder(folder)
+      else if (path) {
+        const parent = items
+          .slice(0, i)
+          .reverse()
+          .find((x) => x.dataset.folder)
+        parent?.focus()
+      }
+    },
+    Enter: () => {
+      if (path) p.onOpenFile(path)
+      else if (folder) p.onToggleFolder(folder)
+    },
+    ' ': () => {
+      if (path) p.onOpenFile(path)
+      else if (folder) p.onToggleFolder(folder)
+    }
+  }
+  const isMenuKey = e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)
+  if (isMenuKey && (path || folder)) {
+    e.preventDefault()
+    if (path) p.onFileContext(path, e, true)
+    else if (folder) p.onFolderContext(folder, e, true)
+    return
+  }
+  const run = actions[e.key]
+  if (!run || (e.target as HTMLElement).tagName === 'INPUT') return
+  e.preventDefault()
+  run()
+}
+
+function FolderBlock({ folder, p, tabStop }: { folder: FolderItem; p: FileTreeProps; tabStop: string | null }) {
+  const renamingFolder = p.renaming?.isFolder && p.renaming.path === folder.id
+  return (
+    <div role="none">
+      {renamingFolder ? (
+        <RenameRow
+          initial={folder.name.split(/\s+\/\s+/).pop() ?? folder.name}
+          path={folder.id}
+          isFolder
+          validate={p.validateName}
+          onCommit={p.onRenameCommit}
+          onCancel={p.onRenameCancel}
+        />
+      ) : (
         <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 12,
-            padding: '40px 22px',
-            textAlign: 'center',
-            color: 'var(--fg-faint)'
+          className="smd-folder"
+          role="treeitem"
+          tabIndex={tabStop === folder.id ? 0 : -1}
+          data-folder={folder.id}
+          aria-expanded={folder.expanded}
+          aria-label={`${folder.name} folder, ${folder.files.length} files`}
+          title={folder.id}
+          onClick={() => p.onToggleFolder(folder.id)}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            p.onFolderContext(folder.id, e, false)
           }}
         >
-          <FolderIcon size={28} style={{ color: 'var(--fg-faint)' }} />
-          <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>
-            Open a folder (every Markdown file inside opens at once), or open individual files.
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="smd-ghostbtn smd-ghostbtn--sm" onClick={onOpenFolder}>
-              <FolderIcon size={14} />
-              Folder
-            </button>
-            <button className="smd-ghostbtn smd-ghostbtn--sm" onClick={onOpenFiles}>
-              <FilePlusIcon size={14} />
-              Files
-            </button>
-          </div>
-          <div style={{ fontSize: 11.5, color: 'var(--fg-faint)' }}>…or drag &amp; drop them here</div>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0', position: 'relative' }}>
-      {folders.map((folder) => (
-        <div key={folder.id}>
-          <div
-            className="smd-folder"
-            role="button"
-            tabIndex={0}
-            aria-expanded={folder.expanded}
-            aria-label={`${folder.name} folder`}
-            onClick={() => onToggleFolder(folder.id)}
-            onKeyDown={activateOnKey(() => onToggleFolder(folder.id))}
-            onContextMenu={(e) => onFolderContext(folder.id, e)}
-            title={folder.id}
+          <ChevronRight size={13} className="smd-folder-chev" />
+          <FolderName name={folder.name} />
+          <span className="smd-folder-count">{folder.files.length || ''}</span>
+          <button
+            type="button"
+            tabIndex={-1}
+            className="smd-iconbtn smd-iconbtn--sm"
+            aria-label={`Open all files in ${folder.name}`}
+            title="Open all files"
+            onClick={(e) => {
+              e.stopPropagation()
+              p.onOpenAll(folder.id)
+            }}
           >
-            <ChevronRight
-              size={13}
-              style={{
-                flex: 'none',
-                transition: 'transform .15s',
-                transform: `rotate(${folder.expanded ? 90 : 0}deg)`
-              }}
-            />
-            <span
-              style={{
-                flex: 1,
-                fontSize: 12.5,
-                fontWeight: 600,
-                letterSpacing: '.01em',
-                color: 'var(--fg)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              {folder.name}
-            </span>
-            <button
-              className="smd-fact"
-              aria-label={`Open all files in ${folder.name}`}
-              title="Open all files in this folder"
-              onClick={(e) => {
-                e.stopPropagation()
-                onOpenAll(folder.id)
-              }}
-            >
-              <OpenAllIcon size={15} />
-            </button>
-          </div>
-          {folder.expanded &&
-            folder.files.map((file) => (
+            <OpenAllIcon size={14} />
+          </button>
+        </div>
+      )}
+      {folder.expanded && (
+        <div role="group">
+          {folder.files.map((file) =>
+            p.renaming && !p.renaming.isFolder && p.renaming.path === file.id ? (
+              <RenameRow
+                key={file.id}
+                initial={file.name}
+                path={file.id}
+                isFolder={false}
+                validate={p.validateName}
+                onCommit={p.onRenameCommit}
+                onCancel={p.onRenameCancel}
+              />
+            ) : (
               <FileRow
                 key={file.id}
-                id={file.id}
-                name={file.name}
-                active={file.active}
-                pinned={file.pinned}
-                onOpenFile={onOpenFile}
-                onPinFile={onPinFile}
-                onFileContext={onFileContext}
+                file={file}
+                tabbable={tabStop === file.id}
+                onOpenFile={p.onOpenFile}
+                onPinFile={p.onPinFile}
+                onFileContext={p.onFileContext}
               />
-            ))}
+            )
+          )}
+          {folder.files.length === 0 && <div className="smd-tree-empty-folder">No Markdown files yet</div>}
         </div>
+      )}
+    </div>
+  )
+}
+
+/** Quiet on purpose: the Welcome screen carries the big actions. */
+function EmptyTree({ onOpenFolder }: Pick<FileTreeProps, 'onOpenFolder'>) {
+  return (
+    <div className="smd-side-empty">
+      <p>Open a folder to see all of its Markdown files here.</p>
+      <button type="button" className="smd-btn smd-btn--ghost smd-btn--sm smd-side-empty-action" onClick={onOpenFolder}>
+        <FolderIcon size={15} /> Open folder…
+      </button>
+    </div>
+  )
+}
+
+/** Roving focus: the active file (when its folder is open), else the first folder. */
+function tabStopOf({ folders }: TreeModel): string | null {
+  for (const f of folders) {
+    if (f.expanded && f.files.some((x) => x.active)) return f.files.find((x) => x.active)?.id ?? null
+  }
+  return folders[0]?.id ?? null
+}
+
+function FileTree(p: FileTreeProps) {
+  if (!p.hasFolder) return p.ready ? <EmptyTree onOpenFolder={p.onOpenFolder} /> : null
+  const { agentFiles, folders } = p.tree
+  const tabStop = tabStopOf(p.tree)
+
+  return (
+    <div className="smd-scroll smd-tree" role="tree" aria-label="Files" onKeyDown={(e) => onTreeKey(e, p)}>
+      {agentFiles.length > 0 && (
+        <div className="smd-agent-group" role="group" aria-label="Agent instructions">
+          <div className="smd-section-label" aria-hidden="true">
+            Agent instructions
+          </div>
+          {agentFiles.map((file) => (
+            <FileRow
+              key={`agent:${file.id}`}
+              file={file}
+              tabbable={false}
+              onOpenFile={p.onOpenFile}
+              onPinFile={p.onPinFile}
+              onFileContext={p.onFileContext}
+            />
+          ))}
+        </div>
+      )}
+      {agentFiles.length > 0 && folders.length > 0 && (
+        <div className="smd-section-label" aria-hidden="true">
+          Files
+        </div>
+      )}
+      {folders.map((folder) => (
+        <FolderBlock key={folder.id} folder={folder} p={p} tabStop={tabStop} />
       ))}
     </div>
   )

@@ -1,55 +1,78 @@
-interface Props {
-  statusLeft: string
-  dirty: boolean
+import { memo } from 'react'
+
+// Slim, optional status line: where you are and whether it's saved on the left;
+// chips (display fixes, changes) and reading stats on the right.
+
+export interface StatusBarProps {
+  folder: string
+  file: string
+  /** null when there is no document. */
+  saveState: 'saved' | 'unsaved' | 'new' | null
   words: number
   minutes: number
-  lines: number
-  modeLabel: string
+  /** Number of "fixed for display" repairs in the current document (chip hidden at 0). */
+  fixes?: number
+  onFixes?: () => void
+  /** Number of changes highlighted since the last look (chip hidden at 0). */
+  changes?: number
+  onChanges?: () => void
 }
 
-export default function StatusBar({
-  statusLeft,
-  dirty,
+const SAVE_LABEL = { saved: 'Saved', unsaved: 'Unsaved', new: 'Not saved yet' } as const
+
+function StatusBar({
+  folder,
+  file,
+  saveState,
   words,
   minutes,
-  lines,
-  modeLabel
-}: Props) {
+  fixes = 0,
+  onFixes,
+  changes = 0,
+  onChanges
+}: StatusBarProps) {
   return (
-    <div
-      className="smd-status"
-      style={{
-        height: 26,
-        flex: 'none',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '0 14px',
-        background: 'var(--bg-elev)',
-        borderTop: '1px solid var(--border)',
-        fontSize: 11.5,
-        color: 'var(--fg-muted)',
-        userSelect: 'none'
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          <span
-            style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', flex: 'none' }}
-          />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {statusLeft}
+    <footer className="smd-status" aria-label="Status">
+      <div className="smd-status-path">
+        {folder && <span>{folder}</span>}
+        {folder && file && (
+          <span className="smd-status-sep" aria-hidden="true">
+            ›
           </span>
+        )}
+        {file && <span className="smd-status-file">{file}</span>}
+      </div>
+      {saveState && (
+        <span className={'smd-status-state' + (saveState === 'saved' ? '' : ' smd-status-state--unsaved')}>
+          {saveState !== 'saved' && <span className="smd-chip-dot" aria-hidden="true" />}
+          {SAVE_LABEL[saveState]}
         </span>
-        {dirty && <span style={{ color: 'var(--accent)', flex: 'none' }}>Unsaved</span>}
+      )}
+      <div className="smd-status-right">
+        {fixes > 0 && (
+          <button
+            type="button"
+            className="smd-chip smd-chip--accent"
+            onClick={onFixes}
+            title="Shown with small display fixes; the file is unchanged"
+          >
+            Fixed for display · {fixes}
+          </button>
+        )}
+        {changes > 0 && (
+          <button type="button" className="smd-chip smd-chip--changed" onClick={onChanges}>
+            <span className="smd-chip-dot" aria-hidden="true" />
+            {changes} {changes === 1 ? 'change' : 'changes'}
+          </button>
+        )}
+        {saveState && (
+          <span>
+            {words.toLocaleString()} {words === 1 ? 'word' : 'words'} · {minutes} min read
+          </span>
+        )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 18, flex: 'none' }}>
-        <span>{words} words</span>
-        <span>{minutes} min read</span>
-        <span>{lines} lines</span>
-        <span style={{ color: 'var(--fg-faint)' }}>{modeLabel}</span>
-        <span style={{ color: 'var(--fg-faint)' }}>Markdown · UTF-8</span>
-      </div>
-    </div>
+    </footer>
   )
 }
+
+export default memo(StatusBar)
