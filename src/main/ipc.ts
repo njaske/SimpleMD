@@ -2,7 +2,7 @@ import { BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'e
 import { dirname } from 'path'
 import { isApproved, isApprovedRoot } from './access'
 import { readImageDataUrl, readMdFile, readMdFiles, resolveDrop, saveMdFile, scanFolder } from './fs-md'
-import { forgetFile, grantFiles, grantRoot } from './grants'
+import { forgetPath, grantFiles, grantRoot } from './grants'
 import { registerWorkspaceIpc } from './ipc-workspace'
 import { loadSettings, saveSettings } from './settings'
 import { extractLaunchPaths } from './launch'
@@ -178,7 +178,7 @@ export function registerIpc(): void {
     if (!isApproved(path)) return false
     try {
       await shell.trashItem(path)
-      await forgetFile(path)
+      await forgetPath(path)
       return true
     } catch {
       return false

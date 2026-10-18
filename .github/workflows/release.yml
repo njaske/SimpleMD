@@ -22,6 +22,18 @@ jobs:
     permissions:
       contents: write # create the draft release
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # electron-builder uploads into the release named v<package.json version>,
+      # while the draft and the checksums use the tag: they must be the same.
+      - name: Check the tag matches package.json
+        run: |
+          expected="v$(node -p "require('./package.json').version")"
+          if [ "$expected" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version ($expected)"
+            exit 1
+          fi
       # Create the draft up front: otherwise the parallel uploads race and
       # electron-builder splits the assets across several drafts.
       - name: Create draft release
@@ -73,8 +85,25 @@ jobs:
           # Built-in token; no code-signing certificate is used yet.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Don't pick up a stray keychain identity on the macOS runner; the
-          # Apple Silicon build is still ad-hoc signed so it launches.
+          # bundle is ad-hoc signed instead (mac.identity "-" in electron-builder.yml).
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      # An invalid signature means Apple Silicon refuses to launch the app. If
+      # this fails the job fails, so the checksums never run and the draft stays
+      # unpublished until it is fixed.
+      - name: Verify the macOS code signatures
+        if: runner.os == 'macOS'
+        run: |
+          found=0
+          for app in dist/mac*/*.app; do
+            [ -d "$app" ] || continue
+            found=1
+            codesign --verify --deep --strict --verbose=2 "$app"
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "::error::No .app bundle found under dist/"
+            exit 1
+          fi
 
   checksums:
     needs: package

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { after, before, beforeEach, describe, it } from 'node:test'
 import {
+  HIDDEN_FOLDER_NAMES,
   UNSAFE_EXTENSIONS,
   copyName,
   createFile,
@@ -16,7 +17,7 @@ import {
   renamedFileName,
   withMarkdownExtension
 } from '../src/main/file-ops.ts'
-import { saveMdFile } from '../src/main/fs-md.ts'
+import { SKIP_DIRS, UNSAFE_SAVE_EXTENSIONS, saveMdFile } from '../src/main/fs-md.ts'
 
 let base: string
 let dir: string
@@ -38,7 +39,7 @@ beforeEach(async () => {
 
 describe('nameProblem', () => {
   it('accepts ordinary file and folder names', () => {
-    for (const name of ['notes.md', 'Meeting notes 2026-10-18.md', 'résumé.md', 'a', '.hidden.md']) {
+    for (const name of ['notes.md', 'Meeting notes 2026-10-18.md', 'résumé.md', 'a', 'Version 1.2.md']) {
       assert.equal(nameProblem(name, 'file'), null, name)
     }
     assert.equal(nameProblem('Project files', 'folder'), null)
@@ -88,7 +89,41 @@ describe('nameProblem', () => {
     assert.equal(nameProblem('tools.js', 'folder'), null)
   })
 
+  it('rejects types that run on double-click on macOS and Linux too', () => {
+    for (const name of ['x.command', 'x.terminal', 'x.tool', 'x.webloc', 'x.scpt', 'x.sh', 'x.desktop', 'x.AppImage']) {
+      assert.ok(nameProblem(name, 'file'), name)
+    }
+    for (const name of ['x.pif', 'x.scf', 'x.msc', 'x.chm', 'x.appref-ms', 'x.settingcontent-ms', 'x.inf']) {
+      assert.ok(nameProblem(name, 'file'), name)
+    }
+  })
+
+  it('rejects folder names that macOS treats as app or installer bundles', () => {
+    for (const name of ['Evil.app', 'x.workflow', 'setup.pkg']) assert.ok(nameProblem(name, 'folder'), name)
+    assert.equal(nameProblem('chart.js', 'folder'), null)
+    assert.equal(nameProblem('v1.2', 'folder'), null)
+  })
+
+  it('rejects names the workspace tree would hide', () => {
+    for (const name of ['.notes', '.draft.md', '.hidden']) {
+      assert.match(nameProblem(name, 'file') ?? '', /dot/, name)
+      assert.match(nameProblem(name, 'folder') ?? '', /dot/, name)
+    }
+    for (const name of ['build', 'out', 'dist', 'node_modules']) {
+      assert.match(nameProblem(name, 'folder') ?? '', /hidden/, name)
+    }
+    // Only folders are skipped by name; a file called "build.md" is listed.
+    assert.equal(nameProblem('build.md', 'file'), null)
+    // The scanner matches exactly, so a differently cased folder is shown.
+    assert.equal(nameProblem('Build', 'folder'), null)
+  })
+
+  it('hides exactly the folders the scanner skips', () => {
+    assert.deepEqual([...HIDDEN_FOLDER_NAMES].sort(), [...SKIP_DIRS].sort())
+  })
+
   it('refuses exactly the extensions the save path refuses', async () => {
+    assert.deepEqual([...UNSAFE_EXTENSIONS].sort(), [...UNSAFE_SAVE_EXTENSIONS].sort())
     for (const ext of UNSAFE_EXTENSIONS) {
       await assert.rejects(saveMdFile(join(dir, `x${ext}`), 'x'), ext)
     }
@@ -107,6 +142,21 @@ describe('withMarkdownExtension / renamedFileName / copyName', () => {
     assert.equal(renamedFileName('draft.md', 'final'), 'final.md')
     assert.equal(renamedFileName('draft.markdown', 'final'), 'final.markdown')
     assert.equal(renamedFileName('draft.md', 'final.mdx'), 'final.mdx')
+  })
+
+  it('keeps a Markdown file Markdown when the new name contains a dot', () => {
+    assert.equal(renamedFileName('draft.md', 'Version 1.2'), 'Version 1.2.md')
+    assert.equal(renamedFileName('draft.md', 'Chapter 1. Intro'), 'Chapter 1. Intro.md')
+    assert.equal(renamedFileName('draft.md', 'notes.txt'), 'notes.txt.md')
+    assert.equal(renamedFileName('draft.MD', 'Final.Markdown'), 'Final.Markdown')
+  })
+
+  it('never changes the type of a non-Markdown file', () => {
+    assert.equal(renamedFileName('photo.png', 'cover'), 'cover.png')
+    assert.equal(renamedFileName('photo.png', 'cover.PNG'), 'cover.PNG')
+    assert.equal(renamedFileName('photo.png', 'cover.plist'), 'cover.plist.png')
+    assert.equal(renamedFileName('LICENSE', 'COPYING'), 'COPYING')
+    assert.throws(() => renamedFileName('LICENSE', 'info.plist'), /type/)
   })
 
   it('numbers copies the way file managers do', () => {
@@ -133,6 +183,7 @@ describe('createFile', () => {
     await assert.rejects(createFile(dir, '../escape', 'x'), /can’t contain/)
     await assert.rejects(createFile(dir, 'nul', 'x'), /reserved/)
     await assert.rejects(createFile(dir, 'evil.exe', 'x'))
+    await assert.rejects(createFile(dir, '.notes', 'x'), /dot/)
     assert.deepEqual(await readdir(dir), [])
     assert.deepEqual((await readdir(base)).filter((n) => n.startsWith('escape')), [])
   })
@@ -154,6 +205,12 @@ describe('createFolder', () => {
 
   it('refuses separators', async () => {
     await assert.rejects(createFolder(dir, 'a/b'))
+  })
+
+  it('refuses names the scanner would hide', async () => {
+    await assert.rejects(createFolder(dir, 'out'), /hidden/)
+    await assert.rejects(createFolder(dir, '.private'), /dot/)
+    assert.deepEqual(await readdir(dir), [])
   })
 })
 
@@ -209,6 +266,29 @@ describe('renamePath', () => {
     await assert.rejects(renamePath(join(dir, 'a.md'), 'a.cmd'))
     await assert.rejects(renamePath(join(dir, 'a.md'), 'a.md '))
     assert.deepEqual(await readdir(dir), ['a.md'])
+  })
+
+  it('keeps the Markdown extension for a name with a dot, so the file stays listed', async () => {
+    await writeFile(join(dir, 'draft.md'), 'text')
+    const next = await renamePath(join(dir, 'draft.md'), 'Version 1.2')
+    assert.equal(next, join(dir, 'Version 1.2.md'))
+    assert.deepEqual(await readdir(dir), ['Version 1.2.md'])
+  })
+
+  it('refuses to rename a document into a macOS or Linux launcher', async () => {
+    await writeFile(join(dir, 'a.md'), 'A')
+    await assert.rejects(renamePath(join(dir, 'a.md'), 'x.command'), /type/)
+    await assert.rejects(renamePath(join(dir, 'a.md'), 'x.terminal'), /type/)
+    await assert.rejects(renamePath(join(dir, 'a.md'), 'x.desktop'), /type/)
+    assert.deepEqual(await readdir(dir), ['a.md'])
+  })
+
+  it('refuses hidden names for files and folders', async () => {
+    await writeFile(join(dir, 'a.md'), 'A')
+    await mkdir(join(dir, 'docs'))
+    await assert.rejects(renamePath(join(dir, 'a.md'), '.a.md'), /dot/)
+    await assert.rejects(renamePath(join(dir, 'docs'), 'build'), /hidden/)
+    assert.deepEqual((await readdir(dir)).sort(), ['a.md', 'docs'])
   })
 
   it('fails for a path that does not exist', async () => {

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { after, before, beforeEach, describe, it } from 'node:test'
 import {
-  MAX_RECOVERY_BYTES,
+  MAX_RECOVERY_CHARS,
   MAX_RECOVERY_ENTRIES,
   RECOVERY_FILE,
   loadRecovery,
@@ -105,10 +105,24 @@ describe('sanitizeEntries', () => {
     assert.equal(sanitizeEntries(many, allowAll).length, MAX_RECOVERY_ENTRIES)
   })
 
-  it('stays within the 20 MB budget by skipping what does not fit', () => {
-    const big = 'x'.repeat(MAX_RECOVERY_BYTES / 2)
-    const result = sanitizeEntries([untitled(1, big), untitled(2, big), untitled(3, 'small')], allowAll)
+  it('stays within the budget by dropping the largest buffers first, keeping order', () => {
+    const half = 'x'.repeat(MAX_RECOVERY_CHARS / 2)
+    const larger = 'x'.repeat(MAX_RECOVERY_CHARS / 2 + 10)
+    const result = sanitizeEntries([untitled(1, half), untitled(2, larger), untitled(3, 'small')], allowAll)
     assert.deepEqual(result.map((e) => e.id), ['untitled:1', 'untitled:3'])
+  })
+
+  it('drops the later of two equally large buffers, like the renderer', () => {
+    const big = 'x'.repeat(MAX_RECOVERY_CHARS / 2 + 1)
+    const result = sanitizeEntries([untitled(1, big), untitled(2, big)], allowAll)
+    assert.deepEqual(result.map((e) => e.id), ['untitled:1'])
+  })
+
+  it('counts characters, not UTF-8 bytes, so a full CJK set is kept whole', () => {
+    // 3 bytes per character in UTF-8: well over 20 MB, but exactly the character budget.
+    const cjk = '字'.repeat(MAX_RECOVERY_CHARS / 2)
+    const result = sanitizeEntries([untitled(1, cjk), untitled(2, cjk)], allowAll)
+    assert.equal(result.length, 2)
   })
 })
 

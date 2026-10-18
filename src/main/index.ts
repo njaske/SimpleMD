@@ -2,7 +2,7 @@ import { app, BrowserWindow, Menu, nativeTheme, session, shell } from 'electron'
 import { join } from 'path'
 import { openFromSecondInstance, prepareLaunch, registerIpc, restoreAccess } from './ipc'
 import { extractLaunchPaths } from './launch'
-import { macMenuTemplate, windowBackground, windowChrome } from './platform'
+import { macMenuTemplate, usesSpellcheck, windowBackground, windowChrome } from './platform'
 import { loadSettings, saveSettings, settingsWritten } from './settings'
 
 const RENDERER_DEV_URL = process.env['ELECTRON_RENDERER_URL']
@@ -40,6 +40,12 @@ function denyPermissionRequests(): void {
   )
 }
 
+// Linux spell-checking would fetch Hunspell dictionaries from Google's servers;
+// switch it off for the whole session, not only per window (see usesSpellcheck).
+function configureSpellcheck(): void {
+  if (!usesSpellcheck(process.platform)) session.defaultSession.setSpellCheckerEnabled(false)
+}
+
 /** Windows and macOS take the icon from the app bundle; Linux needs it on the
  *  window, from the PNG packaged as an extra resource. */
 function windowIcon(): string | undefined {
@@ -59,6 +65,12 @@ type GuardedWindow = BrowserWindow & {
 // finish the quit once the user has answered (macOS would otherwise stay open).
 let quitting = false
 
+/** Quit once the last settings write (tabs, theme, ...) has reached disk. One
+ *  macrotask first, so a save the closing window just sent is queued. */
+function quitAfterSettingsFlush(): void {
+  setTimeout(() => void settingsWritten().finally(() => app.quit()), 0)
+}
+
 function guardUnsavedClose(win: GuardedWindow): void {
   // Unsaved-changes guard: if the renderer reported unsaved edits, defer the
   // close and let it show the confirm dialog (it will call win:forceClose).
@@ -72,7 +84,9 @@ function guardUnsavedClose(win: GuardedWindow): void {
     win.webContents.send('app:request-close')
   })
   win.on('closed', () => {
-    if (win._quitAfterClose) app.quit()
+    // The quit's own flush already ran when the close was deferred; the
+    // renderer saved its tabs since, so flush again before finishing the quit.
+    if (win._quitAfterClose) quitAfterSettingsFlush()
   })
 }
 
@@ -107,7 +121,7 @@ async function createWindow(): Promise<BrowserWindow> {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      spellcheck: true
+      spellcheck: usesSpellcheck(process.platform)
     }
   })
 
@@ -195,6 +209,7 @@ if (!gotLock) {
     await prepareLaunch([...launchArgs, ...earlyOpenFiles.splice(0)], process.cwd())
     applyContentSecurityPolicy()
     denyPermissionRequests()
+    configureSpellcheck()
     registerIpc()
     const win = await createWindow()
     launchPrepared = true
@@ -218,8 +233,7 @@ if (!gotLock) {
     if (settingsFlushed) return
     settingsFlushed = true
     event.preventDefault()
-    // One macrotask first, so a save the closing window just sent is queued.
-    setTimeout(() => void settingsWritten().finally(() => app.quit()), 0)
+    quitAfterSettingsFlush()
   })
 
   if (isDev) {

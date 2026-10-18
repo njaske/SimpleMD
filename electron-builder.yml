@@ -53,9 +53,15 @@ nsis:
   artifactName: ${productName}-Setup.${ext}
 portable:
   artifactName: ${productName}-portable.${ext}
-# Unsigned for now: electron-builder ad-hoc signs the Apple Silicon build so it
-# launches; users confirm the first open in System Settings > Privacy & Security.
+# No Developer ID yet, so the whole bundle is ad-hoc signed ("-"). That is
+# required: the fuses above rewrite the Electron binary, which voids its original
+# signature, and Apple Silicon refuses to launch code without a valid one. The
+# hardened runtime is off because it needs a real Team ID (ad-hoc + hardened
+# runtime fails library validation at launch); it only matters for notarization.
+# Users confirm the first open in System Settings > Privacy & Security.
 mac:
+  identity: '-'
+  hardenedRuntime: false
   target:
     - target: dmg
       arch: [x64, arm64]

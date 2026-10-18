@@ -4,7 +4,9 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import type { DropResult, FolderScan, MdFileInfo, MdFolderInfo, OpenedFile } from '../shared/types'
 
 const MD_EXTENSIONS = new Set(['.md', '.markdown', '.mdown', '.mkd', '.mdx', '.markdn'])
-const SKIP_DIRS = new Set([
+/** Folders the scanner never enters. file-ops refuses these as new folder names
+ *  (a test keeps the two lists equal), so a created folder never seems to vanish. */
+export const SKIP_DIRS: ReadonlySet<string> = new Set([
   'node_modules', '.git', '.svn', '.hg', '.cache', '.next', '.nuxt',
   'dist', 'out', 'build', '.obsidian', '.vscode', '.idea', '.trash'
 ])
@@ -250,10 +252,21 @@ export function isNetworkPath(p: string): boolean {
 }
 
 /** Extensions SimpleMD will never write, so a compromised renderer cannot drop a
- *  runnable file (e.g. into the Startup folder) through the save bridge. */
-const UNSAFE_SAVE_EXTENSIONS = new Set([
-  '.exe', '.com', '.scr', '.bat', '.cmd', '.ps1', '.psm1', '.vbs', '.vbe', '.js', '.jse',
-  '.wsf', '.wsh', '.hta', '.msi', '.msp', '.lnk', '.dll', '.reg', '.cpl', '.jar', '.url'
+ *  runnable file (e.g. into the Startup folder) through the save bridge. Covers
+ *  what launches on double-click on Windows, macOS and Linux; file-ops keeps an
+ *  identical list for create and rename (a test checks that). */
+export const UNSAFE_SAVE_EXTENSIONS: ReadonlySet<string> = new Set([
+  // Windows: executables, scripts, installers, shortcuts and shell handlers.
+  '.exe', '.com', '.scr', '.pif', '.bat', '.cmd', '.ps1', '.psm1', '.psd1', '.ps1xml', '.psc1',
+  '.vb', '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh', '.wsc', '.sct', '.hta', '.msi', '.msp',
+  '.mst', '.msc', '.lnk', '.url', '.scf', '.dll', '.cpl', '.ocx', '.sys', '.reg', '.inf',
+  '.chm', '.gadget', '.appref-ms', '.application', '.settingcontent-ms', '.library-ms',
+  '.search-ms', '.searchconnector-ms', '.xbap', '.diagcab', '.jar', '.jnlp',
+  // macOS: shell commands, Terminal/Automator/AppleScript documents, bundles, links.
+  '.command', '.tool', '.terminal', '.fileloc', '.webloc', '.inetloc', '.scpt', '.scptd',
+  '.applescript', '.workflow', '.action', '.app', '.pkg', '.mpkg', '.prefpane', '.kext',
+  // Linux and Unix: shell scripts, launchers and self-running packages.
+  '.sh', '.bash', '.zsh', '.csh', '.ksh', '.fish', '.desktop', '.run', '.appimage'
 ])
 
 /** Validate a renderer-supplied path before any filesystem write. */

@@ -9,13 +9,15 @@ import type { RecoveryEntry } from '../shared/types'
 // because the file outlives the process that wrote it.
 
 export const MAX_RECOVERY_ENTRIES = 50
-export const MAX_RECOVERY_BYTES = 20 * 1024 * 1024
+/** Text budget in UTF-16 characters (string length), the unit the renderer uses. */
+export const MAX_RECOVERY_CHARS = 20 * 1024 * 1024
 export const RECOVERY_FILE = 'session.json'
 const FILE_VERSION = 1
 const MAX_ID_LENGTH = 4096
 const MAX_TITLE_LENGTH = 256
-// JSON escaping can roughly double text size; anything bigger isn't ours.
-const MAX_FILE_BYTES = 3 * MAX_RECOVERY_BYTES
+// A character is at most 3 UTF-8 bytes, or 6 when JSON escapes it (\u0001);
+// a file bigger than that plus room for ids and titles isn't ours.
+const MAX_FILE_BYTES = 6 * MAX_RECOVERY_CHARS + 4 * 1024 * 1024
 const UNTITLED_ID = /^untitled:\d{1,9}$/
 
 /** Decides whether a file entry's path may be kept (an access check on save). */
@@ -45,24 +47,38 @@ export function sanitizeEntry(value: unknown, allowPath: PathFilter): RecoveryEn
   return { id, path, title: title.slice(0, MAX_TITLE_LENGTH), content, savedAt }
 }
 
-/** Valid entries in order, without duplicate ids, within the count and size caps
- *  (an entry that would overflow the byte budget is skipped). */
+/** Indexes to drop so the rest fit in `budget`: largest first, and the later of
+ *  two equal sizes first. Same rule as the renderer's recoveryEntries, so a set
+ *  it sends is never cut down differently here. */
+function overBudget(sizes: readonly number[], budget: number): Set<number> {
+  let total = sizes.reduce((sum, size) => sum + size, 0)
+  const largestFirst = sizes
+    .map((size, index) => ({ size, index }))
+    .sort((a, b) => b.size - a.size || b.index - a.index)
+  const dropped = new Set<number>()
+  for (const { size, index } of largestFirst) {
+    if (total <= budget) break
+    dropped.add(index)
+    total -= size
+  }
+  return dropped
+}
+
+/** Valid entries in order, without duplicate ids (the first wins), at most 50,
+ *  within the character budget (the largest buffers are dropped first). */
 export function sanitizeEntries(input: unknown, allowPath: PathFilter): RecoveryEntry[] {
   if (!Array.isArray(input)) return []
   const seen = new Set<string>()
-  const kept: RecoveryEntry[] = []
-  let bytes = 0
+  const valid: RecoveryEntry[] = []
   for (const raw of input) {
-    if (kept.length >= MAX_RECOVERY_ENTRIES) break
+    if (valid.length >= MAX_RECOVERY_ENTRIES) break
     const entry = sanitizeEntry(raw, allowPath)
     if (!entry || seen.has(entry.id)) continue
-    const size = Buffer.byteLength(entry.content, 'utf8') + Buffer.byteLength(entry.title, 'utf8')
-    if (bytes + size > MAX_RECOVERY_BYTES) continue
     seen.add(entry.id)
-    bytes += size
-    kept.push(entry)
+    valid.push(entry)
   }
-  return kept
+  const dropped = overBudget(valid.map((entry) => entry.content.length), MAX_RECOVERY_CHARS)
+  return valid.filter((_, index) => !dropped.has(index))
 }
 
 async function removeQuietly(path: string): Promise<void> {

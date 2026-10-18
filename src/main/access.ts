@@ -53,6 +53,16 @@ export function revokeFile(path: string): void {
   if (isLocalAbsolute(path)) files.delete(key(path))
 }
 
+/** Forget every individually approved file at or under `path` (a trashed file
+ *  or folder). Returns how many grants were dropped. */
+export function revokeUnder(path: string): number {
+  if (!isLocalAbsolute(path)) return 0
+  const base = key(path)
+  const gone = [...files].filter((file) => within(base, file))
+  for (const file of gone) files.delete(file)
+  return gone.length
+}
+
 /** Move individual file grants after a rename: the file itself, or every approved
  *  file under a renamed folder. Call it after the rename; returns how many moved. */
 export function moveFileGrants(from: string, to: string): number {

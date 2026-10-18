@@ -1,35 +1,28 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { promises as fs } from 'fs'
-import { basename, extname, join, resolve } from 'path'
+import { basename, extname, join } from 'path'
+import { isApproved, isLocalAbsolute } from './access'
+import { hasUnsafeExtension, nameProblem, withMarkdownExtension } from './file-ops'
+import { saveMdFile } from './fs-md'
+import { grantFiles, settingsStore } from './grants'
+import { saveRecovery } from './recovery-store'
+import { loadSettings } from './settings'
+import { watchFolder } from './watcher'
 import {
-  approveFile,
-  containsApprovedRoot,
-  isApproved,
-  isApprovedRoot,
-  isInsideApprovedRoot,
-  isLocalAbsolute
-} from './access'
-import { writeAsset } from './assets'
-import {
-  createFile,
-  createFolder,
-  duplicateFile,
-  hasUnsafeExtension,
-  nameProblem,
-  renamePath,
-  withMarkdownExtension
-} from './file-ops'
-import { readMdFile, saveMdFile, scanFolder } from './fs-md'
-import { grantFiles, grantRoot, moveGrants } from './grants'
-import { isRecentFolder, removeRecentFolder } from './recent-folders'
-import { loadRecovery, saveRecovery } from './recovery-store'
-import { loadSettings, saveSettings } from './settings'
-import type { FolderScan, OpenedFile, RecoveryEntry } from '../shared/types'
+  createFileIn,
+  createFolderIn,
+  duplicateApproved,
+  openRecentFolder,
+  recoveryLoader,
+  renameApproved,
+  writeImageAsset
+} from './workspace-ops'
+import type { FolderScan } from '../shared/types'
 
 // IPC for creating and changing files: new file / folder, rename, duplicate,
-// Save As, pasted images, HTML/PDF export, crash recovery and recent folders. Every
-// handler checks the allow-list first; the filesystem work lives in
-// electron-free modules (file-ops, assets, recovery-store) that are unit-tested.
+// Save As, pasted images, HTML/PDF export, crash recovery and recent folders.
+// The access decisions live in workspace-ops (electron-free, unit-tested); this
+// file adds the Save dialogs and the folder watcher.
 
 /** A standalone HTML export larger than this is refused (inlined images included). */
 const MAX_EXPORT_CHARS = 64 * 1024 * 1024
@@ -37,10 +30,6 @@ const MARKDOWN_FILTERS = [
   { name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkd', 'mdx', 'markdn'] },
   { name: 'All files', extensions: ['*'] }
 ]
-
-function denied(): never {
-  throw new Error('Access denied: this path was not opened in SimpleMD')
-}
 
 function senderWindow(event: Electron.IpcMainInvokeEvent): BrowserWindow | null {
   return BrowserWindow.fromWebContents(event.sender)
@@ -61,13 +50,6 @@ async function exists(path: string): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-/** A workspace folder new files and folders may be created in. */
-async function assertWorkspaceFolder(dir: unknown): Promise<string> {
-  if (!isInsideApprovedRoot(dir)) denied()
-  if (!(await isDirectory(dir))) throw new Error('That folder no longer exists.')
-  return resolve(dir)
 }
 
 /** A bare, valid file name for a Save dialog, from whatever the renderer sent. */
@@ -130,36 +112,10 @@ function recoveryDir(): string {
   return join(app.getPath('userData'), 'recovery')
 }
 
-async function openRecentFolder(event: Electron.IpcMainInvokeEvent, path: unknown): Promise<FolderScan | null> {
-  const settings = await loadSettings()
-  if (!isRecentFolder(settings.recentFolders, path)) return null
-  const scan = await scanFolder(path)
-  if (!scan) {
-    await saveSettings({ recentFolders: removeRecentFolder(settings.recentFolders, path) })
-    return null
-  }
-  await grantRoot(path, event.sender)
+async function reopenRecentFolder(event: Electron.IpcMainInvokeEvent, path: unknown): Promise<FolderScan | null> {
+  const scan = await openRecentFolder(settingsStore, path)
+  if (scan) watchFolder(scan.root, event.sender)
   return scan
-}
-
-async function renameApproved(path: unknown, newName: unknown): Promise<string> {
-  if (!isApproved(path)) denied()
-  if (isApprovedRoot(path) || containsApprovedRoot(path)) {
-    throw new Error('This folder is open in SimpleMD, so it can’t be renamed here.')
-  }
-  const from = resolve(path)
-  if ((await isDirectory(from)) && !isInsideApprovedRoot(from)) denied()
-  const to = await renamePath(from, newName)
-  if (to !== from) await moveGrants(from, to)
-  return to
-}
-
-async function duplicateApproved(path: unknown): Promise<OpenedFile> {
-  if (!isApproved(path)) denied()
-  const copy = await duplicateFile(resolve(path))
-  // A copy of a loose file sits outside any workspace, so it needs its own grant.
-  if (!isInsideApprovedRoot(copy)) await grantFiles([copy])
-  return { path: copy, content: await readMdFile(copy) }
 }
 
 async function saveAs(event: Electron.IpcMainInvokeEvent, defaultName: unknown, content: unknown): Promise<string | null> {
@@ -214,38 +170,18 @@ async function exportPdf(event: Electron.IpcMainInvokeEvent, defaultName: unknow
   return target
 }
 
-async function writeImageAsset(docPath: unknown, fileName: unknown, data: unknown): Promise<string> {
-  if (!isApproved(docPath)) denied()
-  // A folder (an approved root) is not a document: its parent is outside the grant.
-  const stat = await fs.stat(docPath)
-  if (!stat.isFile()) denied()
-  return writeAsset(resolve(docPath), fileName, data)
-}
-
-async function loadRecoveredBuffers(): Promise<RecoveryEntry[]> {
-  const entries = await loadRecovery(recoveryDir())
-  // The main process wrote these paths itself, after an access check.
-  for (const entry of entries) if (entry.path) approveFile(entry.path)
-  return entries
-}
-
 export function registerWorkspaceIpc(): void {
-  ipcMain.handle('fs:openRecentFolder', openRecentFolder)
+  const loadRecoveredBuffers = recoveryLoader(recoveryDir)
 
-  ipcMain.handle('fs:createFile', async (_event, dir: unknown, name: unknown, content: unknown) => {
-    const folder = await assertWorkspaceFolder(dir)
-    const text = content === undefined || content === null ? '' : content
-    if (typeof text !== 'string') throw new Error('Invalid content')
-    const path = await createFile(folder, name, text)
-    return { path, content: text } satisfies OpenedFile
-  })
-
-  ipcMain.handle('fs:createFolder', async (_event, parent: unknown, name: unknown) =>
-    createFolder(await assertWorkspaceFolder(parent), name)
+  ipcMain.handle('fs:openRecentFolder', reopenRecentFolder)
+  ipcMain.handle('fs:createFile', (_event, dir: unknown, name: unknown, content: unknown) =>
+    createFileIn(dir, name, content)
   )
-
-  ipcMain.handle('fs:renamePath', (_event, path: unknown, newName: unknown) => renameApproved(path, newName))
-  ipcMain.handle('fs:duplicateFile', (_event, path: unknown) => duplicateApproved(path))
+  ipcMain.handle('fs:createFolder', (_event, parent: unknown, name: unknown) => createFolderIn(parent, name))
+  ipcMain.handle('fs:renamePath', (_event, path: unknown, newName: unknown) =>
+    renameApproved(settingsStore, path, newName)
+  )
+  ipcMain.handle('fs:duplicateFile', (_event, path: unknown) => duplicateApproved(settingsStore, path))
   ipcMain.handle('dialog:saveAs', saveAs)
   ipcMain.handle('fs:writeAsset', (_event, docPath: unknown, fileName: unknown, data: unknown) =>
     writeImageAsset(docPath, fileName, data)

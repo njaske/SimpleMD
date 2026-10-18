@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { MenuItemConstructorOptions } from 'electron'
-import { WINDOW_BACKGROUND, macMenuTemplate, windowBackground, windowChrome } from '../src/main/platform.ts'
+import {
+  WINDOW_BACKGROUND,
+  macMenuTemplate,
+  usesSpellcheck,
+  windowBackground,
+  windowChrome
+} from '../src/main/platform.ts'
 
 function flatten(items: MenuItemConstructorOptions[]): MenuItemConstructorOptions[] {
   return items.flatMap((item) => [
@@ -21,6 +27,18 @@ describe('windowBackground', () => {
     assert.equal(windowBackground('system', true), '#1C1B19')
     assert.equal(windowBackground('system', false), '#F7F6F3')
     assert.equal(windowBackground(undefined, false), '#F7F6F3')
+  })
+})
+
+describe('usesSpellcheck', () => {
+  it('uses the OS spellchecker on Windows and macOS', () => {
+    assert.equal(usesSpellcheck('win32'), true)
+    assert.equal(usesSpellcheck('darwin'), true)
+  })
+
+  it('stays off on Linux and elsewhere, where Chromium would download dictionaries', () => {
+    assert.equal(usesSpellcheck('linux'), false)
+    assert.equal(usesSpellcheck('freebsd'), false)
   })
 })
 

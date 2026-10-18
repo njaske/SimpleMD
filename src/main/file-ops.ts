@@ -13,11 +13,33 @@ export const MARKDOWN_EXTENSIONS: ReadonlySet<string> = new Set([
   '.md', '.markdown', '.mdown', '.mkd', '.mdx', '.markdn'
 ])
 
-/** Extensions SimpleMD never writes, so a compromised renderer cannot create a
- *  runnable file. Kept identical to fs-md's save list (a test checks that). */
+/** Extensions SimpleMD never writes or renames to, so a compromised renderer
+ *  cannot create something that runs when double-clicked on Windows, macOS or
+ *  Linux. Kept identical to fs-md's save list (a test checks that). */
 export const UNSAFE_EXTENSIONS: ReadonlySet<string> = new Set([
-  '.exe', '.com', '.scr', '.bat', '.cmd', '.ps1', '.psm1', '.vbs', '.vbe', '.js', '.jse',
-  '.wsf', '.wsh', '.hta', '.msi', '.msp', '.lnk', '.dll', '.reg', '.cpl', '.jar', '.url'
+  // Windows: executables, scripts, installers, shortcuts and shell handlers.
+  '.exe', '.com', '.scr', '.pif', '.bat', '.cmd', '.ps1', '.psm1', '.psd1', '.ps1xml', '.psc1',
+  '.vb', '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh', '.wsc', '.sct', '.hta', '.msi', '.msp',
+  '.mst', '.msc', '.lnk', '.url', '.scf', '.dll', '.cpl', '.ocx', '.sys', '.reg', '.inf',
+  '.chm', '.gadget', '.appref-ms', '.application', '.settingcontent-ms', '.library-ms',
+  '.search-ms', '.searchconnector-ms', '.xbap', '.diagcab', '.jar', '.jnlp',
+  // macOS: shell commands, Terminal/Automator/AppleScript documents, bundles, links.
+  '.command', '.tool', '.terminal', '.fileloc', '.webloc', '.inetloc', '.scpt', '.scptd',
+  '.applescript', '.workflow', '.action', '.app', '.pkg', '.mpkg', '.prefpane', '.kext',
+  // Linux and Unix: shell scripts, launchers and self-running packages.
+  '.sh', '.bash', '.zsh', '.csh', '.ksh', '.fish', '.desktop', '.run', '.appimage'
+])
+
+/** Folder names the workspace scanner skips (fs-md SKIP_DIRS; a test keeps them
+ *  equal). Creating or renaming a folder to one would make it vanish from the tree. */
+export const HIDDEN_FOLDER_NAMES: ReadonlySet<string> = new Set([
+  'node_modules', '.git', '.svn', '.hg', '.cache', '.next', '.nuxt',
+  'dist', 'out', 'build', '.obsidian', '.vscode', '.idea', '.trash'
+])
+
+/** Folder endings macOS treats as an app, installer or plug-in bundle. */
+const BUNDLE_EXTENSIONS: ReadonlySet<string> = new Set([
+  '.app', '.pkg', '.mpkg', '.workflow', '.action', '.prefpane', '.kext', '.scptd'
 ])
 
 const MAX_NAME_LENGTH = 255
@@ -51,7 +73,15 @@ export function nameProblem(name: unknown, kind: NameKind): string | null {
   if (/[. ]$/.test(name)) return 'A name can’t end with a dot or a space.'
   if (name.length > MAX_NAME_LENGTH) return 'That name is too long.'
   if (RESERVED_NAME.test(name)) return 'That name is reserved by Windows.'
+  // The workspace tree never lists these, so the new item would seem to vanish.
+  if (name.startsWith('.')) return 'Names starting with a dot are hidden. Choose another name.'
+  if (kind === 'folder' && HIDDEN_FOLDER_NAMES.has(name)) {
+    return `Folders named “${name}” are hidden from the file list. Choose another name.`
+  }
   if (kind === 'file' && hasUnsafeExtension(name)) return 'SimpleMD can’t create files of that type.'
+  if (kind === 'folder' && BUNDLE_EXTENSIONS.has(extname(name).toLowerCase())) {
+    return 'SimpleMD can’t create folders with that ending.'
+  }
   return null
 }
 
@@ -99,10 +129,17 @@ export async function createFolder(parent: string, name: unknown): Promise<strin
   return target
 }
 
-/** The name a file gets when renamed to `newName`: a bare stem keeps the
- *  original extension, so typing "notes" renames "draft.md" to "notes.md". */
+/** The name a file gets when renamed to `newName`. A rename never changes the
+ *  file type: a Markdown file stays Markdown ("Version 1.2" renames "draft.md"
+ *  to "Version 1.2.md", so it stays in the tree) and any other file keeps its
+ *  extension. Throws when that can't be honoured. */
 export function renamedFileName(oldName: string, newName: string): string {
-  return extname(newName) === '' ? `${newName}${extname(oldName)}` : newName
+  const oldExt = extname(oldName)
+  if (isMarkdownName(oldName)) return isMarkdownName(newName) ? newName : `${newName}${oldExt}`
+  const sameType = (name: string): boolean => extname(name).toLowerCase() === oldExt.toLowerCase()
+  const finalName = sameType(newName) ? newName : `${newName}${oldExt}`
+  if (!sameType(finalName)) throw new Error('A rename can’t change the file type.')
+  return finalName
 }
 
 async function lstatOrNull(path: string): Promise<Stats | null> {

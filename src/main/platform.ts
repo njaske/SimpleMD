@@ -21,6 +21,13 @@ export function windowChrome(platform: NodeJS.Platform): BrowserWindowConstructo
   return { frame: false, titleBarStyle: 'hidden' }
 }
 
+/** Windows and macOS spell-check with the OS's own dictionaries. On Linux
+ *  Chromium would download Hunspell dictionaries from Google's servers, which
+ *  breaks the "no network requests of our own" promise, so it stays off there. */
+export function usesSpellcheck(platform: NodeJS.Platform): boolean {
+  return platform === 'win32' || platform === 'darwin'
+}
+
 /** The minimal native menu macOS needs: without it Cmd+Q/H/M and the clipboard
  *  shortcuts don't work at all. Only roles whose standard shortcuts don't clash
  *  with the app's own (Cmd+N/O/S/W/P/K/B/E/F/T/1/2/3 ... stay with the page), so
