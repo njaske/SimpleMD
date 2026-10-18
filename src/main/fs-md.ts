@@ -4,7 +4,9 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import type { DropResult, FolderScan, MdFileInfo, MdFolderInfo, OpenedFile } from '../shared/types'
 
 const MD_EXTENSIONS = new Set(['.md', '.markdown', '.mdown', '.mkd', '.mdx', '.markdn'])
-const SKIP_DIRS = new Set([
+/** Folders the scanner never enters. file-ops refuses these as new folder names
+ *  (a test keeps the two lists equal), so a created folder never seems to vanish. */
+export const SKIP_DIRS: ReadonlySet<string> = new Set([
   'node_modules', '.git', '.svn', '.hg', '.cache', '.next', '.nuxt',
   'dist', 'out', 'build', '.obsidian', '.vscode', '.idea', '.trash'
 ])
@@ -17,7 +19,9 @@ const IMG_MIME: Record<string, string> = {
 const MAX_FILES = 4000
 const MAX_DEPTH = 12
 const MAX_FILE_BYTES = 5 * 1024 * 1024
-const MAX_IMAGE_BYTES = 16 * 1024 * 1024
+/** Images larger than this aren't shown. Equal to assets.ts MAX_ASSET_BYTES (a
+ *  test keeps them equal), so every pasted image the editor saves is displayed. */
+export const MAX_IMAGE_BYTES = 25 * 1024 * 1024
 /** Parallel file reads during a scan: enough to keep the disk busy without
  *  queueing thousands of pending reads behind libuv's small thread pool. */
 const READ_CONCURRENCY = 32
@@ -244,16 +248,34 @@ export async function saveMdFile(path: string, content: string): Promise<void> {
   }
 }
 
+/** True when `child` is `parent` or lies inside it. A folder named "..notes" is
+ *  inside; only a real ".." step leaves. */
+export function isWithin(parent: string, child: string): boolean {
+  const rel = relative(parent, child)
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
 /** True for UNC / network-share paths (`\\host\share`, `//host/share`, `\\?\UNC\...`). */
 export function isNetworkPath(p: string): boolean {
   return /^[\\/]{2}/.test(p)
 }
 
 /** Extensions SimpleMD will never write, so a compromised renderer cannot drop a
- *  runnable file (e.g. into the Startup folder) through the save bridge. */
-const UNSAFE_SAVE_EXTENSIONS = new Set([
-  '.exe', '.com', '.scr', '.bat', '.cmd', '.ps1', '.psm1', '.vbs', '.vbe', '.js', '.jse',
-  '.wsf', '.wsh', '.hta', '.msi', '.msp', '.lnk', '.dll', '.reg', '.cpl', '.jar', '.url'
+ *  runnable file (e.g. into the Startup folder) through the save bridge. Covers
+ *  what launches on double-click on Windows, macOS and Linux; file-ops keeps an
+ *  identical list for create and rename (a test checks that). */
+export const UNSAFE_SAVE_EXTENSIONS: ReadonlySet<string> = new Set([
+  // Windows: executables, scripts, installers, shortcuts and shell handlers.
+  '.exe', '.com', '.scr', '.pif', '.bat', '.cmd', '.ps1', '.psm1', '.psd1', '.ps1xml', '.psc1',
+  '.vb', '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh', '.wsc', '.sct', '.hta', '.msi', '.msp',
+  '.mst', '.msc', '.lnk', '.url', '.scf', '.dll', '.cpl', '.ocx', '.sys', '.reg', '.inf',
+  '.chm', '.gadget', '.appref-ms', '.application', '.settingcontent-ms', '.library-ms',
+  '.search-ms', '.searchconnector-ms', '.xbap', '.diagcab', '.jar', '.jnlp',
+  // macOS: shell commands, Terminal/Automator/AppleScript documents, bundles, links.
+  '.command', '.tool', '.terminal', '.fileloc', '.webloc', '.inetloc', '.scpt', '.scptd',
+  '.applescript', '.workflow', '.action', '.app', '.pkg', '.mpkg', '.prefpane', '.kext',
+  // Linux and Unix: shell scripts, launchers and self-running packages.
+  '.sh', '.bash', '.zsh', '.csh', '.ksh', '.fish', '.desktop', '.run', '.appimage'
 ])
 
 /** Validate a renderer-supplied path before any filesystem write. */
@@ -304,10 +326,7 @@ export async function readImageDataUrl(
     const roots = (await Promise.all(allowedRoots.map(realpathOrNull))).filter(
       (r): r is string => r !== null
     )
-    const contained = roots.some((root) => {
-      const rel = relative(root, real)
-      return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
-    })
+    const contained = roots.some((root) => isWithin(root, real))
     if (!contained) return null
 
     const stat = await fs.stat(real)

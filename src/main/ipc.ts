@@ -1,39 +1,37 @@
-import { BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
-import { writeFile } from 'fs/promises'
+import { BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import { dirname } from 'path'
-import { approveFile, approveRoot, isApproved, isApprovedRoot } from './access'
+import { isApproved, isApprovedRoot } from './access'
 import { readImageDataUrl, readMdFile, readMdFiles, resolveDrop, saveMdFile, scanFolder } from './fs-md'
+import { forgetPath, grantFiles, grantRoot } from './grants'
+import { registerWorkspaceIpc } from './ipc-workspace'
 import { loadSettings, saveSettings } from './settings'
 import { extractLaunchPaths } from './launch'
+import { windowBackground } from './platform'
 import { pickRendererSettings } from './settings-schema'
 import { watchFolder } from './watcher'
 import type { DropResult } from '../shared/types'
 
+export { restoreAccess } from './grants'
+
 /** A BrowserWindow carrying close-guard flags set over IPC. */
 type GuardedWindow = BrowserWindow & { _hasUnsaved?: boolean; _forceClose?: boolean }
 
-const MAX_APPROVED_FILES = 500
-
-/** Grant and persist access to individually opened files (dialog or drop). */
-async function grantFiles(paths: string[]): Promise<void> {
-  if (!paths.length) return
-  paths.forEach(approveFile)
-  const settings = await loadSettings()
-  const merged = [...new Set([...paths, ...(settings.approvedFiles ?? [])])]
-  await saveSettings({ approvedFiles: merged.slice(0, MAX_APPROVED_FILES) })
-}
-
-/** Grant access to a workspace folder and remember it as the last folder. */
-async function grantRoot(root: string, sender?: Electron.WebContents): Promise<void> {
-  approveRoot(root)
-  await saveSettings({ lastFolder: root })
-  if (sender) watchFolder(root, sender)
-}
-
 // Files/folders given on the command line (double-click, "Open with", a second
-// launch while SimpleMD is already running). The user chose them in the shell, so
-// they are granted like a dialog pick. Held until the renderer asks for them.
+// launch while SimpleMD is already running, macOS `open-file`). The user chose
+// them in the shell, so they are granted like a dialog pick. Held until the
+// renderer asks for them; once a window has taken them, later opens are sent.
 let pendingLaunch: DropResult | null = null
+const launchTaken = new WeakSet<Electron.WebContents>()
+
+/** Two launch results as one: the newer folder wins, files are combined. */
+function mergeLaunch(earlier: DropResult | null, later: DropResult): DropResult {
+  if (!earlier) return later
+  const newer = new Set(later.files.map((f) => f.path))
+  return {
+    folder: later.folder ?? earlier.folder,
+    files: [...earlier.files.filter((f) => !newer.has(f.path)), ...later.files]
+  }
+}
 
 async function resolveLaunch(args: readonly string[], cwd: string): Promise<DropResult | null> {
   const paths = extractLaunchPaths(args, cwd)
@@ -45,42 +43,33 @@ async function resolveLaunch(args: readonly string[], cwd: string): Promise<Drop
   return result
 }
 
-/** Called once at startup with the process arguments (without the executable). */
+/** Called once at startup with the process arguments (without the executable)
+ *  and any macOS `open-file` paths that arrived before the app was ready. */
 export async function prepareLaunch(args: readonly string[], cwd: string): Promise<void> {
-  pendingLaunch = await resolveLaunch(args, cwd)
+  const result = await resolveLaunch(args, cwd)
+  if (result) pendingLaunch = mergeLaunch(pendingLaunch, result)
 }
 
-/** Called when the user opens another file while SimpleMD is already running. */
+/** Called when the user opens files from the shell while SimpleMD is running
+ *  (second instance on Windows/Linux, `open-file` on macOS). A window whose page
+ *  hasn't asked for its launch files yet receives them that way instead. */
 export async function openFromSecondInstance(
   args: readonly string[],
   cwd: string,
-  win: BrowserWindow
+  win: BrowserWindow | null
 ): Promise<void> {
   const result = await resolveLaunch(args, cwd)
   if (!result) return
+  if (!win || win.isDestroyed() || !launchTaken.has(win.webContents)) {
+    pendingLaunch = mergeLaunch(pendingLaunch, result)
+    return
+  }
   if (result.folder) watchFolder(result.folder.root, win.webContents)
   win.webContents.send('app:open-paths', result)
 }
 
-/** Re-grant what the user opened in earlier sessions. Older settings files have
- *  no `approvedFiles`, so their loose files are trusted once to migrate. */
-export async function restoreAccess(): Promise<void> {
-  const settings = await loadSettings()
-  if (typeof settings.lastFolder === 'string') approveRoot(settings.lastFolder)
-  const migrating = !Array.isArray(settings.approvedFiles)
-  const source = migrating ? settings.looseFiles : settings.approvedFiles
-  const approved = Array.isArray(source) ? source.filter((p): p is string => typeof p === 'string') : []
-  approved.forEach(approveFile)
-  if (migrating) await saveSettings({ approvedFiles: approved })
-}
-
 function denied(): never {
   throw new Error('Access denied: this path was not opened in SimpleMD')
-}
-
-// CONTRACT STUB: replaced by the real implementation (see UPGRADE-SPEC.md, lane M).
-function notImplemented(channel: string): never {
-  throw new Error(`${channel} is not implemented yet`)
 }
 
 const MIN_ZOOM = 0.8
@@ -135,6 +124,7 @@ export function registerIpc(): void {
   ipcMain.handle('app:takeLaunchFiles', (event) => {
     const pending = pendingLaunch
     pendingLaunch = null
+    launchTaken.add(event.sender)
     if (pending?.folder) watchFolder(pending.folder.root, event.sender)
     return pending
   })
@@ -169,9 +159,16 @@ export function registerIpc(): void {
 
   // `lastFolder` widens the image-read roots, so only the main process (folder
   // dialog / drop) may set it; the renderer may persist display state only.
-  ipcMain.handle('settings:set', (_event, partial: unknown) =>
-    saveSettings(pickRendererSettings(partial))
-  )
+  ipcMain.handle('settings:set', async (_event, partial: unknown) => {
+    const picked = pickRendererSettings(partial)
+    const saved = await saveSettings(picked)
+    // Keep the native window fill in step, so a resize never flashes the old theme.
+    if (picked.theme) {
+      const color = windowBackground(picked.theme, nativeTheme.shouldUseDarkColors)
+      for (const win of BrowserWindow.getAllWindows()) win.setBackgroundColor(color)
+    }
+    return saved
+  })
 
   ipcMain.handle('shell:openExternal', async (_event, url: string) => {
     if (typeof url === 'string' && /^https?:\/\//i.test(url)) await shell.openExternal(url)
@@ -181,6 +178,7 @@ export function registerIpc(): void {
     if (!isApproved(path)) return false
     try {
       await shell.trashItem(path)
+      await forgetPath(path)
       return true
     } catch {
       return false
@@ -240,33 +238,5 @@ export function registerIpc(): void {
     clipboard.write({ html, text })
   })
 
-  // ---- CONTRACT STUBS (lane M implements these; signatures in src/shared/types.ts) ----
-  ipcMain.handle('fs:openRecentFolder', () => notImplemented('fs:openRecentFolder'))
-  ipcMain.handle('fs:createFile', () => notImplemented('fs:createFile'))
-  ipcMain.handle('fs:createFolder', () => notImplemented('fs:createFolder'))
-  ipcMain.handle('fs:renamePath', () => notImplemented('fs:renamePath'))
-  ipcMain.handle('fs:duplicateFile', () => notImplemented('fs:duplicateFile'))
-  ipcMain.handle('dialog:saveAs', () => notImplemented('dialog:saveAs'))
-  ipcMain.handle('fs:writeAsset', () => notImplemented('fs:writeAsset'))
-  ipcMain.handle('export:html', () => notImplemented('export:html'))
-  ipcMain.handle('recovery:save', () => notImplemented('recovery:save'))
-  ipcMain.handle('recovery:load', () => [])
-
-  ipcMain.handle('export:pdf', async (event, defaultName: string) => {
-    const win = senderWindow(event)
-    if (!win) return false
-    const base = (defaultName || 'document').replace(/\.[^.]+$/, '')
-    const result = await dialog.showSaveDialog(win, {
-      title: 'Export to PDF',
-      defaultPath: `${base}.pdf`,
-      filters: [{ name: 'PDF Document', extensions: ['pdf'] }]
-    })
-    if (result.canceled || !result.filePath) return false
-    const data = await win.webContents.printToPDF({
-      printBackground: true,
-      pageSize: 'A4'
-    })
-    await writeFile(result.filePath, data)
-    return result.filePath
-  })
+  registerWorkspaceIpc()
 }

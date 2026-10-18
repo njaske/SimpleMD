@@ -6,9 +6,16 @@ publish:
 directories:
   output: dist
   buildResources: build
+# The renderer, main and preload are fully bundled by electron-vite, and the
+# main process only needs Electron and Node built-ins, so node_modules stays out
+# of the archive (it would add ~200 MB of sources nothing loads).
 files:
   - out/**/*
   - package.json
+  - '!node_modules{,/**/*}'
+# Chromium ships ~55 UI locales; the app's own text is English.
+electronLanguages: [en-US]
+compression: maximum
 # Harden the packaged Electron binary: no running it as plain Node, no
 # NODE_OPTIONS / --inspect injection, and only load the integrity-checked asar.
 electronFuses:
@@ -20,11 +27,15 @@ electronFuses:
   onlyLoadAppFromAsar: true
 # Register SimpleMD as a handler for Markdown files, so Explorer's "Open with"
 # list shows it (as "SimpleMD") and double-click / Open with passes the file path.
+# On macOS this becomes CFBundleDocumentTypes; `Alternate` lists SimpleMD in
+# "Open With" without taking over the user's default app.
 fileAssociations:
   - ext: [md, markdown, mdown, mkd, mdx, markdn]
     name: Markdown Document
     description: Markdown Document
     role: Editor
+    rank: Alternate
+    mimeType: text/markdown
 win:
   target:
     - target: nsis
@@ -42,3 +53,48 @@ nsis:
   artifactName: ${productName}-Setup.${ext}
 portable:
   artifactName: ${productName}-portable.${ext}
+# No Developer ID yet, so the whole bundle is ad-hoc signed ("-"). That is
+# required: the fuses above rewrite the Electron binary, which voids its original
+# signature, and Apple Silicon refuses to launch code without a valid one. The
+# hardened runtime is off because it needs a real Team ID (ad-hoc + hardened
+# runtime fails library validation at launch); it only matters for notarization.
+# Users confirm the first open in System Settings > Privacy & Security.
+mac:
+  identity: '-'
+  hardenedRuntime: false
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+  category: public.app-category.productivity
+  # electron-builder converts the PNG to .icns (1024 px is recommended).
+  icon: build/icon.png
+  darkModeSupport: true
+  artifactName: ${productName}-mac-${arch}.${ext}
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+    - target: rpm
+      arch: [x64]
+  category: Office
+  icon: build/icon.png
+  mimeTypes: [text/markdown, text/x-markdown]
+  synopsis: A calm place to read what your AI writes
+  description: A fast, private desktop Markdown reader for AI-generated docs, with KaTeX math and Mermaid diagrams.
+  maintainer: njaske <njaske@users.noreply.github.com>
+  vendor: njaske
+  artifactName: ${productName}-linux-${arch}.${ext}
+  # The window icon on Linux comes from this file (see windowIcon in src/main/index.ts).
+  extraResources:
+    - from: build/icon.png
+      to: icon.png
+  desktop:
+    entry:
+      Name: SimpleMD
+      GenericName: Markdown Reader
+      Comment: Read and lightly edit Markdown, beautifully and privately
+      Keywords: markdown;md;reader;viewer;notes;ai;

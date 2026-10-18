@@ -1,8 +1,9 @@
 name: Release
 
-# Build the Windows installer + portable exe when a version tag is pushed.
-#   git tag v1.0.1 && git push origin v1.0.1
-# electron-builder creates a DRAFT release; review it, then publish it manually.
+# Build Windows, macOS and Linux packages when a version tag is pushed.
+#   git tag v1.1.0 && git push origin v1.1.0
+# Every OS uploads into the same DRAFT release, then one job adds a combined
+# SHA256SUMS.txt. Review the draft, then publish it manually.
 on:
   push:
     tags:
@@ -11,11 +12,54 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  windows:
-    runs-on: windows-latest
+  draft:
+    runs-on: ubuntu-latest
     permissions:
-      contents: write # create the release and upload assets
+      contents: write # create the draft release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # electron-builder uploads into the release named v<package.json version>,
+      # while the draft and the checksums use the tag: they must be the same.
+      - name: Check the tag matches package.json
+        run: |
+          expected="v$(node -p "require('./package.json').version")"
+          if [ "$expected" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version ($expected)"
+            exit 1
+          fi
+      # Create the draft up front: otherwise the parallel uploads race and
+      # electron-builder splits the assets across several drafts.
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 \
+            || gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft \
+                 --verify-tag --title "${GITHUB_REF_NAME#v}" --notes "SimpleMD ${GITHUB_REF_NAME}"
+
+  package:
+    name: package (${{ matrix.os }})
+    needs: draft
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: --win
+          - os: macos-latest
+            platform: --mac
+          - os: ubuntu-latest
+            platform: --linux
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # upload assets to the draft release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -25,33 +69,57 @@ jobs:
           node-version: 24
           cache: npm
 
+      # fpm needs rpmbuild for the .rpm target.
+      - name: Install Linux packaging tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
 
-      # Create the draft up front: otherwise the installer and portable uploads
-      # race and electron-builder splits the assets across two drafts.
-      - name: Create draft release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 \
-            || gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft \
-                 --title "${GITHUB_REF_NAME#v}" --notes "SimpleMD ${GITHUB_REF_NAME}"
-
       - name: Package and upload to draft release
-        run: npx --no-install electron-builder --win --publish always
+        run: npx --no-install electron-builder ${{ matrix.platform }} --publish always
         env:
-          # Built-in token; no code-signing certificate is used.
+          # Built-in token; no code-signing certificate is used yet.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Don't pick up a stray keychain identity on the macOS runner; the
+          # bundle is ad-hoc signed instead (mac.identity "-" in electron-builder.yml).
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
-      - name: Publish SHA-256 checksums
-        shell: bash
+      # An invalid signature means Apple Silicon refuses to launch the app. If
+      # this fails the job fails, so the checksums never run and the draft stays
+      # unpublished until it is fixed.
+      - name: Verify the macOS code signatures
+        if: runner.os == 'macOS'
+        run: |
+          found=0
+          for app in dist/mac*/*.app; do
+            [ -d "$app" ] || continue
+            found=1
+            codesign --verify --deep --strict --verbose=2 "$app"
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "::error::No .app bundle found under dist/"
+            exit 1
+          fi
+
+  checksums:
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # upload SHA256SUMS.txt
+    steps:
+      # Hash what is actually attached to the release, for every OS at once.
+      - name: Publish combined SHA-256 checksums
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cd dist
-          sha256sum SimpleMD-Setup.exe SimpleMD-portable.exe | tee SHA256SUMS.txt
+          mkdir release-files && cd release-files
+          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+            --pattern '*.exe' --pattern '*.dmg' --pattern '*.zip' \
+            --pattern '*.AppImage' --pattern '*.deb' --pattern '*.rpm'
+          sha256sum -- * | tee ../SHA256SUMS.txt
+          cd ..
           gh release upload "${GITHUB_REF_NAME}" SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --clobber
