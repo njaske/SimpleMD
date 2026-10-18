@@ -4,10 +4,12 @@ import type { MenuEntry } from '@/components/ContextMenu'
 import { formatShortcut, revealLabel, trashName } from '@/lib/logic/platform'
 import {
   BookmarkIcon,
+  CheckIcon,
   CloseIcon,
   CopyIcon,
   DownloadIcon,
   FilePlusIcon,
+  FileTextIcon,
   FolderPlusIcon,
   LayersIcon,
   OpenAllIcon,
@@ -21,7 +23,8 @@ import type { AppHost } from './host'
 import type { DocumentActions } from './documents'
 import type { ExportActions } from './exporting'
 import type { FileActions } from './files'
-import { dirOf, isUntitled, isWithin, tabsRightOf } from './model'
+import { dirOf, isDirtyIn, isUntitled, isWithin, tabsRightOf } from './model'
+import { tabLabel } from './view'
 
 export interface MenuDeps {
   host: AppHost
@@ -32,6 +35,21 @@ export interface MenuDeps {
 
 const SEP: MenuEntry = { separator: true }
 const ICON = 15
+
+/** Accessible names of the top-bar menus (also how the bar knows which one is open). */
+export const DOC_MENU = 'Document actions'
+export const TAB_LIST = 'Open tabs'
+
+/** Every open tab, for the strip's overflow button: the active one is checked. */
+export function tabListMenu({ host, docs }: MenuDeps, nameOf: (id: string) => string): MenuEntry[] {
+  const s = host.state()
+  return s.openTabs.map((id) => ({
+    label: tabLabel(nameOf(id)),
+    icon: id === s.activeId ? <CheckIcon size={ICON} /> : <FileTextIcon size={ICON} />,
+    hint: isDirtyIn(s.contents, s.saved, id) ? 'Unsaved' : undefined,
+    onSelect: () => void docs.openFile(id)
+  }))
+}
 
 export function tabMenu({ host, docs, files }: MenuDeps, id: string): MenuEntry[] {
   const s = host.state()

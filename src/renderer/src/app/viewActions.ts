@@ -31,17 +31,20 @@ export function createViewActions(host: AppHost) {
     )
 
   /** The button that showed the sidebar unmounts, so keyboard focus moves into the
-   *  sidebar instead of falling back to the page. */
+   *  sidebar instead of falling back to the page. Focus mode hides the sidebar, so
+   *  asking for it leaves focus mode. */
   const showSidebar = (): void =>
     host.update(
-      (s) => (s.compact ? { sidebarPeek: true } : { sidebarOpen: true }),
+      (s) => (s.compact ? { sidebarPeek: true, focusMode: false } : { sidebarOpen: true, focusMode: false }),
       focusSidebar
     )
 
   const setActivity = (activity: Activity): void =>
     host.update((s) => ({ activity, sidebarOpen: true, sidebarPeek: s.compact }))
 
-  const toggleOutline = (): void => host.update((s) => ({ outlineOpen: !s.outlineOpen }))
+  /** Focus mode hides the outline, so asking for it there leaves focus mode. */
+  const toggleOutline = (): void =>
+    host.update((s) => (s.focusMode ? { focusMode: false, outlineOpen: true } : { outlineOpen: !s.outlineOpen }))
   const toggleStatusBar = (): void => host.update((s) => ({ showStatusBar: !s.showStatusBar }))
   const toggleFocus = (): void =>
     host.update((s) => ({ focusMode: !s.focusMode, sidebarPeek: false, readingOpen: false }))

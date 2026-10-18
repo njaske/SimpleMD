@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import type { FolderScan, MdFolderInfo } from '../src/shared/types.ts'
 import {
   adoptSavedAs,
+  autoOpenFiles,
   baseName,
   closeTabs,
   cycleTab,
@@ -236,6 +237,37 @@ describe('moving documents', () => {
     assert.deepEqual(adoptSavedAs(s, 'untitled:1', '/w/a.md', 'x', false).openTabs, ['/w/a.md'])
   })
 
+  it('treats Save as onto the same file as a plain save', () => {
+    const s = slice({
+      openTabs: ['/w/a.md', '/w/b.md'],
+      activeId: '/w/a.md',
+      contents: { '/w/a.md': 'NEW EDITS' },
+      saved: { '/w/a.md': 'old' },
+      externalChanges: { '/w/a.md': true }
+    })
+    const r = adoptSavedAs(s, '/w/a.md', '/w/a.md', 'NEW EDITS', false)
+    assert.deepEqual(r.openTabs, ['/w/a.md', '/w/b.md'])
+    assert.equal(r.activeId, '/w/a.md')
+    assert.equal(r.contents['/w/a.md'], 'NEW EDITS')
+    assert.equal(r.saved['/w/a.md'], 'NEW EDITS')
+    assert.deepEqual(r.externalChanges, {})
+  })
+
+  it('hands a real file saved onto another open tab to that tab', () => {
+    const s = slice({
+      openTabs: ['/w/a.md', '/w/b.md'],
+      activeId: '/w/a.md',
+      contents: { '/w/a.md': 'mine', '/w/b.md': 'theirs' },
+      saved: { '/w/a.md': 'old a', '/w/b.md': 'theirs' }
+    })
+    const r = adoptSavedAs(s, '/w/a.md', '/w/b.md', 'mine', false)
+    assert.deepEqual(r.openTabs, ['/w/b.md'])
+    assert.equal(r.activeId, '/w/b.md')
+    assert.equal(r.contents['/w/b.md'], 'mine')
+    assert.equal(r.saved['/w/b.md'], 'mine')
+    assert.equal(r.contents['/w/a.md'], 'old a', 'the old file was not written')
+  })
+
   it('forgets a document everywhere', () => {
     const s = slice({
       openTabs: ['a', 'b'],
@@ -334,5 +366,16 @@ describe('reconcileScan', () => {
     assert.equal(reconcileNote({ reloaded: ['a'], removed: 0 }), 'Reloaded 1 file changed on disk')
     assert.equal(reconcileNote({ reloaded: [], removed: 2 }), '2 files were removed on disk')
     assert.equal(reconcileNote({ reloaded: [], removed: 0 }), null)
+  })
+})
+
+describe('autoOpenFiles', () => {
+  it('puts README first and caps the tabs a new folder opens with', () => {
+    const all = ['/w/a.md', '/w/b.md', '/w/c.md', '/w/d.md', '/w/e.md', '/w/f.md', '/w/g.md', '/w/README.md']
+    assert.deepEqual(autoOpenFiles(all), ['/w/README.md', '/w/a.md', '/w/b.md', '/w/c.md'])
+  })
+
+  it('keeps tree order when there is no README', () => {
+    assert.deepEqual(autoOpenFiles(['/w/x.md', '/w/y.md'], 6), ['/w/x.md', '/w/y.md'])
   })
 })

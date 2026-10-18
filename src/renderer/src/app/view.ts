@@ -81,16 +81,28 @@ export function buildTree(s: TreeInput, isAgent: (name: string) => boolean): Tre
 
 type TabsInput = Pick<AppState, 'openTabs' | 'activeId' | 'pinned' | 'contents' | 'saved'>
 
+const MD_EXT = /\.(md|markdown|mdown|mkd|mdx)$/i
+
+/** A tab's label: "notes" for "notes.md", so narrow tabs keep the part that differs. */
+export function tabLabel(name: string): string {
+  const stem = name.replace(MD_EXT, '')
+  return stem || name
+}
+
 export function buildTabs(s: TabsInput, nameOf: (id: string) => string): TabItem[] {
-  return s.openTabs.map((id) => ({
-    id,
-    name: nameOf(id),
-    active: id === s.activeId,
-    pinned: s.pinned.includes(id),
-    dirty: isDirtyIn(s.contents, s.saved, id),
-    untitled: isUntitled(id),
-    path: isUntitled(id) ? '' : id
-  }))
+  return s.openTabs.map((id) => {
+    const name = nameOf(id)
+    return {
+      id,
+      name,
+      label: tabLabel(name),
+      active: id === s.activeId,
+      pinned: s.pinned.includes(id),
+      dirty: isDirtyIn(s.contents, s.saved, id),
+      untitled: isUntitled(id),
+      path: isUntitled(id) ? '' : id
+    }
+  })
 }
 
 type QuickInput = Pick<AppState, 'recents' | 'pinned' | 'openTabs' | 'root' | 'rootName'>

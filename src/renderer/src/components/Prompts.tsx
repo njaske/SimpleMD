@@ -10,6 +10,7 @@ export function ConfirmDialog({
   message,
   confirmLabel,
   danger,
+  safeDefault = false,
   onConfirm,
   onCancel
 }: {
@@ -17,6 +18,8 @@ export function ConfirmDialog({
   message: string
   confirmLabel: string
   danger?: boolean
+  /** Focus Cancel instead of the confirm button. */
+  safeDefault?: boolean
   onConfirm: () => void
   onCancel: () => void
 }) {
@@ -27,14 +30,14 @@ export function ConfirmDialog({
       onClose={onCancel}
       actions={
         <>
-          <button type="button" className="smd-btn" onClick={onCancel}>
+          <button type="button" className="smd-btn" onClick={onCancel} data-autofocus={safeDefault || undefined}>
             Cancel
           </button>
           <button
             type="button"
             className={'smd-btn ' + (danger ? 'smd-btn--danger' : 'smd-btn--primary')}
             onClick={onConfirm}
-            data-autofocus
+            data-autofocus={!safeDefault || undefined}
           >
             {confirmLabel}
           </button>

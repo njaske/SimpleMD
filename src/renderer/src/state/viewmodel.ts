@@ -33,6 +33,8 @@ export interface TreeModel {
 export interface TabItem {
   id: string
   name: string
+  /** Shown on the tab: the name without its Markdown extension (kept in the tooltip). */
+  label: string
   active: boolean
   pinned: boolean
   dirty: boolean

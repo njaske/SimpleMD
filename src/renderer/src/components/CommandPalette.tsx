@@ -5,7 +5,7 @@ import type { CommandGroup, CommandId } from '@/lib/commands'
 import { GROUP_ORDER, paletteOrder } from '@/lib/commands'
 import { fuzzyFilter } from '@/lib/logic/fuzzy'
 import { useFocusReturn } from '@/lib/a11y'
-import { BookmarkFill, CommandIcon, FileTextIcon, FolderIcon, SearchIcon, SparkIcon } from '@/lib/icons'
+import { BookmarkFill, FileTextIcon, FolderIcon, PromptIcon, SearchIcon, SparkIcon } from '@/lib/icons'
 
 // Quick Open and the command palette in one: plain text searches files, a leading
 // ">" searches commands. Arrow keys + Enter, Esc closes, hover selects.
@@ -193,7 +193,7 @@ export default function CommandPalette(p: CommandPaletteProps) {
         >
           <div className="smd-palette-field">
             {isCommands ? (
-              <CommandIcon size={17} />
+              <PromptIcon size={17} />
             ) : p.foldersMode ? (
               <FolderIcon size={17} />
             ) : (

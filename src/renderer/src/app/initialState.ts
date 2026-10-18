@@ -37,6 +37,7 @@ export function initialState(env: Pick<AppState, 'systemDark' | 'narrow' | 'comp
     closed: [],
     untitledSeq: 0,
     ready: false,
+    restored: false,
     ...env,
     sidebarPeek: false,
     isMaximized: false,

@@ -7,7 +7,6 @@ import {
   BookmarkIcon,
   ChevronRight,
   FileTextIcon,
-  FilePlusIcon,
   FolderIcon,
   OpenAllIcon,
   SparkIcon
@@ -19,6 +18,8 @@ type ContextHandler = (id: string, e: ReactMouseEvent | KeyboardEvent, keyboard:
 export interface FileTreeProps {
   tree: TreeModel
   hasFolder: boolean
+  /** The session has been restored; until then the empty state stays hidden. */
+  ready: boolean
   renaming: RenameState | null
   validateName: (path: string, name: string, isFolder: boolean) => string | null
   onRenameCommit: (path: string, name: string, isFolder: boolean) => void
@@ -28,8 +29,6 @@ export interface FileTreeProps {
   onOpenAll: (id: string) => void
   onPinFile: (id: string) => void
   onOpenFolder: () => void
-  onOpenFiles: () => void
-  onNewDocument: () => void
   onFileContext: ContextHandler
   onFolderContext: ContextHandler
 }
@@ -279,21 +278,14 @@ function FolderBlock({ folder, p, tabStop }: { folder: FolderItem; p: FileTreePr
   )
 }
 
-function EmptyTree(p: FileTreeProps) {
+/** Quiet on purpose: the Welcome screen carries the big actions. */
+function EmptyTree({ onOpenFolder }: Pick<FileTreeProps, 'onOpenFolder'>) {
   return (
     <div className="smd-side-empty">
-      <h3>No folder open</h3>
-      <p>Open a folder to see every Markdown file in it, or open single files.</p>
-      <button type="button" className="smd-btn" onClick={p.onOpenFolder}>
+      <p>Open a folder to see all of its Markdown files here.</p>
+      <button type="button" className="smd-btn smd-btn--ghost smd-btn--sm smd-side-empty-action" onClick={onOpenFolder}>
         <FolderIcon size={15} /> Open folder…
       </button>
-      <button type="button" className="smd-btn" onClick={p.onOpenFiles}>
-        <FileTextIcon size={15} /> Open file…
-      </button>
-      <button type="button" className="smd-btn" onClick={p.onNewDocument}>
-        <FilePlusIcon size={15} /> New document
-      </button>
-      <span className="smd-side-empty-hint">Or drop files and folders anywhere.</span>
     </div>
   )
 }
@@ -307,7 +299,7 @@ function tabStopOf({ folders }: TreeModel): string | null {
 }
 
 function FileTree(p: FileTreeProps) {
-  if (!p.hasFolder) return <EmptyTree {...p} />
+  if (!p.hasFolder) return p.ready ? <EmptyTree onOpenFolder={p.onOpenFolder} /> : null
   const { agentFiles, folders } = p.tree
   const tabStop = tabStopOf(p.tree)
 

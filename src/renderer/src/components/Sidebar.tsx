@@ -20,7 +20,7 @@ export interface SidebarProps {
   onSettings: () => void
   onToggleTheme: () => void
   onShortcuts: () => void
-  tree: Omit<FileTreeProps, 'onNewDocument'>
+  tree: FileTreeProps
   searchQuery: string
   searchResult: SearchResult
   onSearchInput: (value: string) => void
@@ -71,7 +71,7 @@ function Sidebar(p: SidebarProps) {
       </div>
 
       <div className="smd-side-body">
-        {p.activity === 'files' && <FileTree {...p.tree} onNewDocument={p.onNewDocument} />}
+        {p.activity === 'files' && <FileTree {...p.tree} />}
         {p.activity === 'search' && (
           <SearchPanel
             query={p.searchQuery}

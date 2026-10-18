@@ -53,6 +53,9 @@ export function buildCommandTable({ host, docs, files, view, exports, renameTarg
     previousTab: { run: () => docs.cycle(-1), enabled: manyTabs },
     quickOpen: { run: () => view.openPalette('') },
     commandPalette: { run: () => view.openPalette('>') },
+    // Until the FindBar is wired (integration replaces this line), Mod+F keeps its
+    // 1.1 behaviour of opening the Search panel rather than going dead.
+    findInDocument: { run: view.searchAll },
     searchAllFiles: { run: view.searchAll },
     viewRead: { run: () => view.setView('read'), enabled: hasDoc },
     viewSplit: { run: () => view.setView('split'), enabled: hasDoc },
@@ -78,7 +81,8 @@ export function buildCommandTable({ host, docs, files, view, exports, renameTarg
         if (t) files.startRename(t.path, t.isFolder)
         else if (isUntitled(s().activeId)) void docs.saveAs(active())
       },
-      enabled: hasDoc
+      // A focused tree row can be renamed even with no tab open.
+      enabled: () => hasDoc() || renameTarget() !== null
     },
     duplicate: { run: () => void files.duplicate(active()), enabled: hasFile },
     newFileInFolder: {

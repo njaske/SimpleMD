@@ -20,6 +20,7 @@ export interface TopBarProps {
   outlineAvailable: boolean
   readingOpen: boolean
   docMenuOpen: boolean
+  tabListOpen: boolean
   isMaximized: boolean
   /** Formatted shortcut for a command id, for tooltips ("Ctrl+B"). */
   hint: (shortcut: string) => string
@@ -28,6 +29,7 @@ export interface TopBarProps {
   onCloseTab: (id: string) => void
   onTabContext: (id: string, e: ReactMouseEvent | KeyboardEvent, keyboard: boolean) => void
   onNewDocument: () => void
+  onTabList: (anchor: HTMLElement, keyboard: boolean) => void
   onSetView: (mode: ViewMode) => void
   onToggleOutline: () => void
   onToggleReading: (anchor: HTMLElement) => void
@@ -64,6 +66,8 @@ export default function TopBar(p: TopBarProps) {
         onContext={p.onTabContext}
         onNew={p.onNewDocument}
         newLabel={`New document (${p.hint('Mod+N')})`}
+        onList={p.onTabList}
+        listOpen={p.tabListOpen}
       />
       {p.hasDocument && (
         <div className="smd-topbar-actions">

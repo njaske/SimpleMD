@@ -18,7 +18,7 @@ import {
 } from '@/lib/icons'
 import { version } from '../../../../package.json'
 import Dialog from './Dialog'
-import { FontPicker, LineHeightPicker, SizeStepper, ThemePicker, WidthPicker } from './ReadingControls'
+import { FontPicker, LineHeightPicker, SizeStepper, ThemePicker, WidthPicker, radioKeys } from './ReadingControls'
 
 // Settings sheet: left nav, live-applying controls on the right. Mod+, opens it;
 // Mod+/ opens it on Shortcuts.
@@ -98,6 +98,40 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: 
   )
 }
 
+/** Roving focus like the other pickers: one tab stop, arrows move and select. */
+function AccentSwatches({ value, onChange }: { value: string; onChange: (accent: string) => void }) {
+  const found = ACCENTS.findIndex((a) => a.value === value.toLowerCase())
+  const index = Math.max(0, found)
+  return (
+    <div
+      className="smd-swatches"
+      role="radiogroup"
+      aria-label="Accent color"
+      onKeyDown={(e) => radioKeys(e, index, ACCENTS.length, (i) => onChange(ACCENTS[i].value))}
+    >
+      {ACCENTS.map((a, i) => {
+        const on = i === found
+        return (
+          <button
+            key={a.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            aria-label={a.name}
+            title={a.name}
+            tabIndex={i === index ? 0 : -1}
+            className="smd-swatch"
+            style={{ background: a.value }}
+            onClick={() => onChange(a.value)}
+          >
+            {on && <CheckIcon size={13} />}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function Appearance({ values: v, onChange }: SettingsDialogProps) {
   return (
     <>
@@ -107,26 +141,7 @@ function Appearance({ values: v, onChange }: SettingsDialogProps) {
         </div>
       </Setting>
       <Setting label="Accent color" desc="Used for links, selection and the active item.">
-        <div className="smd-swatches" role="radiogroup" aria-label="Accent color">
-          {ACCENTS.map((a) => {
-            const on = v.accent.toLowerCase() === a.value
-            return (
-              <button
-                key={a.value}
-                type="button"
-                role="radio"
-                aria-checked={on}
-                aria-label={a.name}
-                title={a.name}
-                className="smd-swatch"
-                style={{ background: a.value }}
-                onClick={() => onChange({ accent: a.value })}
-              >
-                {on && <CheckIcon size={13} />}
-              </button>
-            )
-          })}
-        </div>
+        <AccentSwatches value={v.accent} onChange={(accent) => onChange({ accent })} />
       </Setting>
       <Setting label="Interface size" desc="Scales the whole window, text and controls.">
         <div className="smd-scale">

@@ -73,6 +73,26 @@ describe('opening a folder never clobbers unsaved edits', () => {
     assert.equal(s.activeId, '/new/n.md')
   })
 
+  it('opens README first and only a few tabs, with Open all in the toast', async () => {
+    const names = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'README']
+    const scan = scanOf('/w', Object.fromEntries(names.map((n) => [`/w/${n}.md`, n])))
+    const fake = await fakeHost()
+    stubApi({ openRecentFolder: async () => scan, getSettings: async () => ({}) as never })
+
+    await files.createFileActions(fake.host, noDocs).openRecentFolder('/w')
+
+    const s = fake.state()
+    assert.equal(s.openTabs.length, 4)
+    assert.equal(s.openTabs[0], '/w/README.md')
+    assert.equal(s.activeId, '/w/README.md')
+    assert.equal(fake.toasts.at(-1), 'Opened 4 of 8 Markdown files')
+    const openAll = fake.toastActions.at(-1)
+    assert.equal(openAll?.label, 'Open all')
+    openAll?.run()
+    assert.equal(fake.state().openTabs.length, 8)
+    assert.equal(fake.state().activeId, '/w/README.md', 'Open all keeps the document you were reading')
+  })
+
   it('says clearly when a recent folder is gone', async () => {
     const fake = await fakeHost()
     stubApi({ openRecentFolder: async () => null })

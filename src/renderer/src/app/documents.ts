@@ -229,8 +229,7 @@ export function createDocumentActions(host: AppHost, deps: DocumentDeps) {
       return next && next !== s.activeId ? { activeId: next } : null
     })
 
-  const reloadFromDisk = async (id: string | null = host.state().activeId): Promise<void> => {
-    if (!id || isUntitled(id)) return
+  const readFromDisk = async (id: string): Promise<void> => {
     try {
       const text = await window.api.readFile(id)
       host.update((s) => ({
@@ -241,6 +240,28 @@ export function createDocumentActions(host: AppHost, deps: DocumentDeps) {
     } catch (err) {
       fail(`Couldn't reload ${baseName(id)}`, err, 'It may have been moved or deleted.')
     }
+  }
+
+  /** Replace a document's text with the disk copy. Unsaved edits are only thrown
+   *  away after a confirm, unless the caller already asked (the conflict bar). */
+  const reloadFromDisk = async (
+    id: string | null = host.state().activeId,
+    opts: { confirmed?: boolean } = {}
+  ): Promise<void> => {
+    if (!id || isUntitled(id)) return
+    if (opts.confirmed || !isDirty(host.state(), id)) return readFromDisk(id)
+    host.update({
+      menu: null,
+      dialog: {
+        kind: 'confirm',
+        title: `Discard your edits to “${host.nameOf(id)}”?`,
+        message: 'Reloading replaces your unsaved edits with the text on disk. This can’t be undone.',
+        confirmLabel: 'Discard and reload',
+        danger: true,
+        safeDefault: true,
+        onConfirm: () => readFromDisk(id)
+      }
+    })
   }
 
   const keepMine = (id: string): void => host.update((s) => ({ externalChanges: without(s.externalChanges, id) }))

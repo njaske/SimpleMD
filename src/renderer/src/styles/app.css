@@ -26,6 +26,11 @@
   clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 
+/* Theme switches land in one frame (App adds this for two frames). */
+.smd-theme-switching, .smd-theme-switching *, .smd-theme-switching *::before, .smd-theme-switching *::after {
+  transition: none !important;
+}
+
 /* Window drag regions: empty space in the top bar and sidebar header. */
 .smd-drag { -webkit-app-region: drag; }
 .smd-drag button, .smd-drag input, .smd-drag [role='tab'], .smd-drag a, .smd-nodrag { -webkit-app-region: no-drag; }
@@ -250,11 +255,10 @@ button.smd-chip:hover { color: var(--fg); border-color: var(--border-strong); }
 .smd-tree-empty-folder { margin: 1px 8px 0; padding: 4px 6px 6px 26px; font-size: 12px; color: var(--fg-faint); }
 
 /* Sidebar empty / hint states */
-.smd-side-empty { padding: 26px 20px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
-.smd-side-empty h3 { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--fg); }
-.smd-side-empty p { margin: 0 0 4px; font-size: 12.5px; line-height: 1.5; color: var(--fg-muted); }
-.smd-side-empty .smd-btn { width: 100%; justify-content: flex-start; }
-.smd-side-empty-hint { font-size: 12px; color: var(--fg-faint); }
+.smd-side-empty { padding: 18px 18px 0 20px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.smd-side-empty p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--fg-muted); }
+/* Ghost button pulled left so its label lines up with the sentence above. */
+.smd-side-empty-action { margin-left: -8px; color: var(--accent-fg); }
 
 /* Search panel */
 .smd-search-head { flex: none; padding: 0 10px 8px; }
@@ -296,26 +300,46 @@ button.smd-chip:hover { color: var(--fg); border-color: var(--border-strong); }
 }
 .smd-topbar-lead { flex: none; display: flex; align-items: center; padding-left: 8px; }
 .smd-platform-darwin.smd-no-sidebar .smd-topbar-lead { padding-left: 80px; }
+/* Strip = scrolling tabs + (overflow list) + New document + a drag filler. Tabs keep
+   their natural width (names stay readable) and the strip scrolls once they overflow;
+   + sits right after the last tab until then. */
+.smd-tabstrip { flex: 1; min-width: 0; display: flex; align-items: stretch; padding: 0 4px 0 6px; }
 .smd-tabs {
-  flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 0; padding: 0 8px 0 6px;
+  flex: 0 1 auto; min-width: 0; display: flex; align-items: flex-end; gap: 0;
   overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+  --tab-fade: 28px;
 }
 .smd-tabs::-webkit-scrollbar { display: none; }
+/* Clipped edges fade out so it's clear more tabs sit that way. */
+.smd-tabs.is-clipped-end { mask-image: linear-gradient(to right, #000 calc(100% - var(--tab-fade)), transparent); }
+.smd-tabs.is-clipped-start { mask-image: linear-gradient(to left, #000 calc(100% - var(--tab-fade)), transparent); }
+.smd-tabs.is-clipped-start.is-clipped-end {
+  mask-image: linear-gradient(to right, transparent, #000 var(--tab-fade), #000 calc(100% - var(--tab-fade)), transparent);
+}
+.smd-tabs-more, .smd-tabs-new { flex: none; align-self: center; margin-left: 4px; }
+.smd-tabs-more { margin-left: 2px; }
+.smd-tabs-more[aria-expanded='true'] { background: var(--bg-active); color: var(--fg); }
 .smd-tab {
-  position: relative; flex: 0 1 184px; min-width: 96px; height: 35px; display: flex; align-items: center; gap: 7px;
+  position: relative; flex: none; min-width: 96px; max-width: 200px; height: 35px; display: flex; align-items: center; gap: 7px;
   padding: 0 6px 0 12px; margin-bottom: -1px; border: 1px solid transparent; border-bottom: none;
-  border-radius: 9px 9px 0 0; color: var(--fg-muted); font-size: 12.5px; outline: none;
+  border-radius: 9px 9px 0 0; color: var(--fg-muted); font-size: 12.5px; outline: none; isolation: isolate;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast);
 }
+/* Hover pill drawn behind the label, so the tab box (and its label) never moves. */
+.smd-tab::after {
+  content: ''; position: absolute; inset: 4px 2px 4px; z-index: -1; border-radius: 8px;
+  background: var(--bg-hover); opacity: 0; transition: opacity var(--dur-fast) var(--ease-out);
+}
+.smd-tab:hover::after { opacity: 1; }
+.smd-tab.is-active::after { display: none; }
 .smd-tab::before {
   content: ''; position: absolute; left: -1px; top: 10px; bottom: 9px; width: 1px; background: var(--border-strong);
 }
 .smd-tab:first-child::before, .smd-tab.is-active::before, .smd-tab.is-active + .smd-tab::before,
 .smd-tab:hover::before, .smd-tab:hover + .smd-tab::before { opacity: 0; }
-.smd-tab:hover { background: var(--bg-hover); color: var(--fg); border-radius: 8px; height: 30px; margin-bottom: 4px; }
-.smd-tab.is-active, .smd-tab.is-active:hover {
-  background: var(--bg); color: var(--fg); border-color: var(--border); height: 35px; margin-bottom: -1px;
-  border-radius: 9px 9px 0 0; box-shadow: 0 -1px 3px rgb(40 30 20 / 0.03);
+.smd-tab:hover { color: var(--fg); }
+.smd-tab.is-active {
+  background: var(--bg); color: var(--fg); border-color: var(--border); box-shadow: 0 -1px 3px rgb(40 30 20 / 0.03);
 }
 .smd-tab:focus-visible { box-shadow: inset 0 0 0 2px var(--focus); }
 .smd-tab-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -334,7 +358,7 @@ button.smd-chip:hover { color: var(--fg); border-color: var(--border-strong); }
 .smd-tab--dirty .smd-tab-close { opacity: 0; }
 .smd-tab--dirty:hover .smd-tab-close, .smd-tab--dirty .smd-tab-close:focus-visible { opacity: 1; }
 .smd-tab--dirty:hover .smd-tab-dirty { opacity: 0; }
-.smd-tabs-filler { flex: 1 0 24px; align-self: stretch; }
+.smd-tabs-filler { flex: 1 0 24px; }
 
 .smd-topbar-actions { flex: none; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 4px; }
 .smd-topbar-actions .smd-seg-group { margin-right: 4px; }
@@ -353,11 +377,11 @@ button.smd-chip:hover { color: var(--fg); border-color: var(--border-strong); }
 
 /* Focus mode: chrome steps back; the top bar returns under the pointer or keyboard. */
 .smd-focus .smd-topbar { background: var(--bg); border-bottom-color: transparent; }
-.smd-focus .smd-topbar .smd-tabs, .smd-focus .smd-topbar .smd-topbar-actions, .smd-focus .smd-topbar .smd-topbar-lead {
+.smd-focus .smd-topbar .smd-tabstrip, .smd-focus .smd-topbar .smd-topbar-actions, .smd-focus .smd-topbar .smd-topbar-lead {
   opacity: 0; transition: opacity var(--dur-slow) var(--ease-out);
 }
-.smd-focus .smd-topbar:hover .smd-tabs, .smd-focus .smd-topbar:hover .smd-topbar-actions, .smd-focus .smd-topbar:hover .smd-topbar-lead,
-.smd-focus .smd-topbar:focus-within .smd-tabs, .smd-focus .smd-topbar:focus-within .smd-topbar-actions,
+.smd-focus .smd-topbar:hover .smd-tabstrip, .smd-focus .smd-topbar:hover .smd-topbar-actions, .smd-focus .smd-topbar:hover .smd-topbar-lead,
+.smd-focus .smd-topbar:focus-within .smd-tabstrip, .smd-focus .smd-topbar:focus-within .smd-topbar-actions,
 .smd-focus .smd-topbar:focus-within .smd-topbar-lead { opacity: 1; }
 .smd-focus .smd-tab.is-active { background: transparent; border-color: transparent; }
 .smd-focus .smd-winbtn { opacity: .55; }
@@ -489,6 +513,10 @@ button.smd-chip:hover { color: var(--fg); border-color: var(--border-strong); }
 .smd-palette-label { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .smd-palette-label mark, .smd-palette-detail mark { background: none; color: var(--fg); font-weight: 650; text-decoration: underline; text-decoration-color: color-mix(in oklch, var(--accent) 55%, transparent); text-underline-offset: 3px; text-decoration-thickness: 1.5px; }
 .smd-palette-detail { flex: 1; min-width: 0; font-size: 12.5px; color: var(--fg-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* --fg-faint is tuned for plain surfaces; the tinted selected row needs the stronger grey. */
+.smd-palette-item[aria-selected='true'] .smd-palette-detail { color: var(--fg-muted); }
+/* The dark wash is lighter, so it needs a step more (AA with room to spare). */
+.smd-dark .smd-palette-item[aria-selected='true'] .smd-palette-detail { color: color-mix(in srgb, var(--fg) 55%, var(--fg-muted)); }
 .smd-palette-meta { flex: none; display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .smd-palette-meta svg { color: var(--fg-faint); }
 .smd-palette-empty { padding: 30px 16px 34px; text-align: center; font-size: 13px; color: var(--fg-faint); line-height: 1.5; }
@@ -535,6 +563,7 @@ button.smd-chip:hover { color: var(--fg); border-color: var(--border-strong); }
 
 .smd-menu {
   position: fixed; z-index: 100; min-width: 208px; max-width: 300px; padding: 5px; border-radius: var(--radius-m);
+  max-height: calc(100vh - 16px); overflow-y: auto; scroll-padding: 5px;
   background: var(--bg-elev); border: 1px solid var(--border); box-shadow: var(--shadow-2); outline: none;
   animation: smdPop 140ms var(--ease-out);
 }

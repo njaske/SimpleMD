@@ -26,6 +26,8 @@ export type DialogState =
       message: string
       confirmLabel: string
       danger?: boolean
+      /** Focus Cancel first: confirming loses work that can't come back. */
+      safeDefault?: boolean
       onConfirm: () => void | Promise<void>
     }
   /** "Save changes to …?" before closing these tabs. */
@@ -83,6 +85,9 @@ export interface AppState {
 
   // Window and transient UI
   ready: boolean
+  /** The last session (folder, tabs, launch files) is back; Welcome and the empty
+   *  tree wait for it so they never flash before the restored document. */
+  restored: boolean
   systemDark: boolean
   /** Window narrower than the outline breakpoint. */
   narrow: boolean

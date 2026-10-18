@@ -84,6 +84,7 @@ function DialogLayer({ dialog, p }: { dialog: DialogState; p: Props }) {
           message={dialog.message}
           confirmLabel={dialog.confirmLabel}
           danger={dialog.danger}
+          safeDefault={dialog.safeDefault}
           onCancel={close}
           onConfirm={() => {
             close()

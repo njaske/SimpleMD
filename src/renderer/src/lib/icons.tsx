@@ -133,9 +133,10 @@ export const KeyboardIcon = (p: IconProps) => (
     <path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M7.5 14h9" />
   </Stroke>
 )
-export const CommandIcon = (p: IconProps) => (
-  <Stroke {...p}>
-    <path d="M9 9V6.5A2.5 2.5 0 1 0 6.5 9H9zm0 0h6m-6 0v6m6-6V6.5A2.5 2.5 0 1 1 17.5 9H15zm0 0v6m0 0h2.5a2.5 2.5 0 1 1-2.5 2.5V15zm0 0H9m0 0v2.5A2.5 2.5 0 1 1 6.5 15H9z" />
+/** A prompt chevron for Commands mode (the same on every platform, unlike ⌘). */
+export const PromptIcon = (p: IconProps) => (
+  <Stroke sw={1.8} {...p}>
+    <path d="M5.5 7.5l4.5 4.5-4.5 4.5M12.5 17h6" />
   </Stroke>
 )
 export const DotsIcon = (p: IconProps) => (
@@ -160,6 +161,11 @@ export const OutlineIcon = (p: IconProps) => (
 export const ChevronRight = (p: IconProps) => (
   <Stroke sw={1.8} {...p}>
     <path d="M9.5 6l6 6-6 6" />
+  </Stroke>
+)
+export const ChevronDown = (p: IconProps) => (
+  <Stroke sw={1.8} {...p}>
+    <path d="M6 9.5l6 6 6-6" />
   </Stroke>
 )
 export const OpenAllIcon = (p: IconProps) => (

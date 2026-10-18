@@ -208,16 +208,34 @@ export function remapPaths(s: DocSlice, from: string, to: string): DocSlice {
   }
 }
 
+/** Save as onto the document's own file is a plain save: nothing else moves. */
+function savedInPlace(s: DocSlice, path: string, content: string): DocSlice {
+  return {
+    ...s,
+    contents: { ...s.contents, [path]: content },
+    saved: { ...s.saved, [path]: content },
+    externalChanges: without(s.externalChanges, path),
+    recents: pushRecents([path], s.recents)
+  }
+}
+
+/** The old file's buffer after its text was saved elsewhere: an untitled one goes away,
+ *  a real file falls back to its last saved text (it wasn't written). */
+function leftBehind(rec: Record<string, string>, saved: Record<string, string>, fromId: string): Record<string, string> {
+  if (isUntitled(fromId)) return without(rec, fromId)
+  return saved[fromId] === undefined ? rec : { ...rec, [fromId]: saved[fromId] }
+}
+
 /** An untitled tab became the file at `path` (Save as): same tab position, text kept and
- *  now saved. A real file saved under a new name keeps its old file's last saved text. */
+ *  now saved. A real file saved under a new name keeps its old file's last saved text.
+ *  When `path` is already open in another tab, that tab takes over. */
 export function adoptSavedAs(s: DocSlice, fromId: string, path: string, content: string, loose: boolean): DocSlice {
+  if (path === fromId) return savedInPlace(s, path, content)
   const openTabs = s.openTabs.includes(path)
     ? s.openTabs.filter((t) => t !== fromId)
     : s.openTabs.map((t) => (t === fromId ? path : t))
-  const dropOld = isUntitled(fromId)
-  const contents = { ...(dropOld ? without(s.contents, fromId) : s.contents), [path]: content }
-  if (!dropOld && s.saved[fromId] !== undefined) contents[fromId] = s.saved[fromId]
-  const saved = { ...(dropOld ? without(s.saved, fromId) : s.saved), [path]: content }
+  const contents = { ...leftBehind(s.contents, s.saved, fromId), [path]: content }
+  const saved = { ...(isUntitled(fromId) ? without(s.saved, fromId) : s.saved), [path]: content }
   const looseFiles =
     loose && !s.looseFiles.some((f) => f.path === path)
       ? [...s.looseFiles, { id: path, path, name: baseName(path), dir: dirOf(path) }]
@@ -229,6 +247,7 @@ export function adoptSavedAs(s: DocSlice, fromId: string, path: string, content:
     contents,
     saved,
     looseFiles,
+    externalChanges: without(s.externalChanges, path),
     recents: pushRecents([path], s.recents)
   }
 }
@@ -359,6 +378,19 @@ export function reconcileNote(r: Pick<ReconcileResult, 'reloaded' | 'removed'>):
   if (n > 0) return `Reloaded ${n} file${n === 1 ? '' : 's'} changed on disk`
   if (r.removed > 0) return `${r.removed} file${r.removed === 1 ? ' was' : 's were'} removed on disk`
   return null
+}
+
+/** Tabs a freshly opened folder starts with: enough to begin reading without
+ *  flooding the strip (the rest are one click away in the tree or "Open all"). */
+export const MAX_AUTO_OPEN = 4
+const LEAD_FILE = /^(readme|index)\.(md|markdown)$/i
+
+/** The files a newly opened folder shows as tabs: its README (or index) first,
+ *  then the rest in tree order, capped at `max`. */
+export function autoOpenFiles(allFiles: readonly string[], max = MAX_AUTO_OPEN): string[] {
+  const lead = allFiles.find((p) => LEAD_FILE.test(baseName(p)))
+  const ordered = lead ? [lead, ...allFiles.filter((p) => p !== lead)] : allFiles
+  return ordered.slice(0, max)
 }
 
 /** Folders expanded after opening a workspace: all of them when there are few. */

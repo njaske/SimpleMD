@@ -116,6 +116,44 @@ describe('saving', () => {
   })
 })
 
+describe('reload from disk', () => {
+  const dirty = { openTabs: ['/a.md'], activeId: '/a.md', contents: { '/a.md': 'mine' }, saved: { '/a.md': 'old' } }
+
+  it('asks before throwing away unsaved edits, with Cancel as the default', async () => {
+    const fake = await fakeHost(dirty)
+    stubApi({ readFile: async () => 'disk' })
+    const actions = docs.createDocumentActions(fake.host, noRescan)
+
+    await actions.reloadFromDisk('/a.md')
+
+    const d = fake.state().dialog
+    assert.equal(d?.kind, 'confirm')
+    assert.equal(fake.state().contents['/a.md'], 'mine', 'nothing changes until confirmed')
+    if (d?.kind !== 'confirm') return
+    assert.equal(d.danger, true)
+    assert.equal(d.safeDefault, true)
+    await d.onConfirm()
+    assert.equal(fake.state().contents['/a.md'], 'disk')
+    assert.equal(fake.state().saved['/a.md'], 'disk')
+  })
+
+  it('reloads straight away when the conflict bar already asked, or nothing is unsaved', async () => {
+    const fake = await fakeHost({ ...dirty, externalChanges: { '/a.md': true } })
+    stubApi({ readFile: async () => 'disk' })
+    const actions = docs.createDocumentActions(fake.host, noRescan)
+
+    await actions.reloadFromDisk('/a.md', { confirmed: true })
+    assert.equal(fake.state().dialog, null)
+    assert.equal(fake.state().contents['/a.md'], 'disk')
+    assert.deepEqual(fake.state().externalChanges, {})
+
+    stubApi({ readFile: async () => 'disk 2' })
+    await actions.reloadFromDisk('/a.md')
+    assert.equal(fake.state().dialog, null)
+    assert.equal(fake.state().contents['/a.md'], 'disk 2')
+  })
+})
+
 describe('closing with unsaved changes', () => {
   const dirty = {
     openTabs: ['/a.md', 'untitled:1'],

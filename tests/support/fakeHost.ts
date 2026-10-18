@@ -3,17 +3,21 @@
 import type { Api, FolderScan, MdFileInfo } from '../../src/shared/types.ts'
 import type { AppHost, Updater } from '../../src/renderer/src/app/host.ts'
 import type { AppState } from '../../src/renderer/src/app/types.ts'
+import type { ToastAction } from '../../src/renderer/src/components/Toast.tsx'
 
 export interface FakeHost {
   host: AppHost
   state: () => AppState
   toasts: string[]
+  /** The action button of each toast (undefined when it had none). */
+  toastActions: (ToastAction | undefined)[]
 }
 
 export async function fakeHost(over: Partial<AppState> = {}): Promise<FakeHost> {
   const { initialState } = await import('../../src/renderer/src/app/initialState.ts')
-  let state: AppState = { ...initialState({ systemDark: false, narrow: false, compact: false }), ready: true, ...over }
+  let state: AppState = { ...initialState({ systemDark: false, narrow: false, compact: false }), ready: true, restored: true, ...over }
   const toasts: string[] = []
+  const toastActions: (ToastAction | undefined)[] = []
   const host: AppHost = {
     platform: 'win32',
     reader: {} as AppHost['reader'],
@@ -23,12 +27,15 @@ export async function fakeHost(over: Partial<AppState> = {}): Promise<FakeHost> 
       if (patch) state = { ...state, ...patch }
       then?.()
     },
-    toast: (message) => toasts.push(message),
+    toast: (message, action) => {
+      toasts.push(message)
+      toastActions.push(action)
+    },
     nameOf: (id) => id.split(/[\/]/).pop() ?? id,
     renderDoc: () => undefined,
     focusEditor: () => undefined
   }
-  return { host, state: () => state, toasts }
+  return { host, state: () => state, toasts, toastActions }
 }
 
 /** Install `api` as window.api (only the methods a test needs). */

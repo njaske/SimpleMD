@@ -58,7 +58,7 @@ export async function bootstrap({ host, files, recovery, onSettings }: BootDeps)
   try {
     s = await window.api.getSettings()
   } catch {
-    host.update({ ready: true })
+    host.update({ ready: true, restored: true })
     host.toast("Couldn't load your settings, so SimpleMD started with the defaults.")
     // Recovery doesn't depend on settings: still offer what the last session left.
     await offerRecovery(host, recovery, window.api.loadRecovery().catch(() => []))
@@ -89,6 +89,7 @@ export async function bootstrap({ host, files, recovery, onSettings }: BootDeps)
   // Files opened from the shell that started this launch go on top of the session.
   const launched = await launchFiles
   if (launched) files.openResult(launched)
+  host.update({ restored: true })
 
   await offerRecovery(host, recovery, recovered)
 }

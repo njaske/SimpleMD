@@ -8,6 +8,8 @@ import type { AppHost } from './host'
 import { reason } from './host'
 import type { DocumentActions } from './documents'
 import {
+  MAX_AUTO_OPEN,
+  autoOpenFiles,
   baseName,
   dirOf,
   dropDoc,
@@ -29,7 +31,8 @@ import {
 } from './model'
 import type { DocSlice } from './model'
 
-const MAX_AUTO_OPEN = 40
+/** "Open all" from the folder-opened toast still caps the strip. */
+const MAX_OPEN_ALL = 40
 
 export type FileActions = ReturnType<typeof createFileActions>
 
@@ -45,8 +48,8 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`
 }
 
-/** The tab strip after a scan: the restored session, or every file (capped) for
- *  openAll; null keeps the current tabs. */
+/** The tab strip after a scan: the restored session, or the first few files (README
+ *  first) for a newly opened folder; null keeps the current tabs. */
 function tabsForScan(scan: FolderScan, opts: ScanOptions): { openTabs: string[] | null; activeId: string | null } {
   const allFiles = scan.tree.flatMap((f) => f.files.map((x) => x.path))
   let openTabs: string[] | null = null
@@ -56,15 +59,19 @@ function tabsForScan(scan: FolderScan, opts: ScanOptions): { openTabs: string[] 
     activeId = opts.restoreActive && openTabs.includes(opts.restoreActive) ? opts.restoreActive : (openTabs[0] ?? null)
   }
   if (opts.openAll) {
-    openTabs = allFiles.slice(0, MAX_AUTO_OPEN)
+    openTabs = autoOpenFiles(allFiles)
     activeId = openTabs[0] ?? null
   }
   if (openTabs && !openTabs.length && allFiles.length) return { openTabs: [allFiles[0]], activeId: allFiles[0] }
   return { openTabs, activeId }
 }
 
-function openAllNote(scan: FolderScan): string {
-  const n = scan.tree.reduce((sum, f) => sum + f.files.length, 0)
+function fileCount(scan: FolderScan): number {
+  return scan.tree.reduce((sum, f) => sum + f.files.length, 0)
+}
+
+function openedNote(scan: FolderScan): string {
+  const n = fileCount(scan)
   if (n > MAX_AUTO_OPEN) return `Opened ${MAX_AUTO_OPEN} of ${n} Markdown files`
   return n > 0 ? `Opened ${plural(n, 'Markdown file')}` : `${scan.name} has no Markdown files yet`
 }
@@ -92,7 +99,8 @@ export function createFileActions(host: AppHost, docs: () => DocumentActions) {
 
   const applyScan = (scan: FolderScan, opts: ScanOptions): void => {
     const { openTabs, activeId } = tabsForScan(scan, opts)
-    let note = opts.openAll ? openAllNote(scan) : null
+    let note = opts.openAll ? openedNote(scan) : null
+    const moreToOpen = !!opts.openAll && fileCount(scan) > MAX_AUTO_OPEN
     // Unsaved edits are never replaced by disk text, and their tabs stay open.
     const before = host.state()
     const kept = unsavedIds(before.contents, before.saved).filter(
@@ -129,7 +137,17 @@ export function createFileActions(host: AppHost, docs: () => DocumentActions) {
       const which = kept.length === 1 ? host.nameOf(kept[0]) : plural(kept.length, 'document')
       note = `${note ? `${note}. ` : ''}Your unsaved edits in ${which} were kept.`
     }
-    if (note) host.toast(note)
+    if (note) host.toast(note, moreToOpen ? { label: 'Open all', run: openWorkspaceFiles } : undefined)
+  }
+
+  /** Open every workspace file as a tab (capped), keeping the tabs already open. */
+  const openWorkspaceFiles = (): void => {
+    const all = host.state().tree.flatMap((f) => f.files.map((x) => x.path))
+    host.update((s) => {
+      const extra = all.filter((p) => !s.openTabs.includes(p))
+      return { openTabs: [...s.openTabs, ...extra.slice(0, Math.max(0, MAX_OPEN_ALL - s.openTabs.length))] }
+    })
+    if (all.length > MAX_OPEN_ALL) host.toast(`Opened ${MAX_OPEN_ALL} of ${all.length} files. The rest are in the sidebar.`)
   }
 
   const openFolderDialog = async (): Promise<void> => {

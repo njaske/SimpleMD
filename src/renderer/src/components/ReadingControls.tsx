@@ -17,7 +17,8 @@ import Segmented from './Segmented'
 
 const FONTS: ReadingFont[] = ['Serif', 'Sans', 'Mono', 'Hyperlegible']
 
-function radioKeys(e: KeyboardEvent<HTMLDivElement>, index: number, count: number, pick: (i: number) => void): void {
+/** Arrow keys move and select inside a roving-focus radiogroup. */
+export function radioKeys(e: KeyboardEvent<HTMLDivElement>, index: number, count: number, pick: (i: number) => void): void {
   const delta =
     e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
   if (!delta) return

@@ -27,7 +27,7 @@ import { createFileActions } from '@/app/files'
 import { createViewActions } from '@/app/viewActions'
 import { createExportActions } from '@/app/exporting'
 import { createDropTarget } from '@/app/dragDrop'
-import { documentMenu, fileMenu, folderMenu, tabMenu, type MenuDeps } from '@/app/menus'
+import { DOC_MENU, TAB_LIST, documentMenu, fileMenu, folderMenu, tabListMenu, tabMenu, type MenuDeps } from '@/app/menus'
 import { buildCommandTable, type CommandTable } from '@/app/commandTable'
 import { createKeyHandler } from '@/app/keyboard'
 import { SettingsWriter, settingsSnapshot } from '@/app/persistence'
@@ -41,6 +41,8 @@ const CodeEditor = lazy(() => import('@/components/CodeEditor'))
 /** Warm the lazy editor chunk this long after startup, off the critical path. */
 const EDITOR_PREFETCH_DELAY_MS = 2000
 const NO_SEARCH: SearchResult = { groups: [], total: 0, fileCount: 0 }
+/** Upper bound on how long a theme switch keeps transitions off. */
+const THEME_SWITCH_MS = 120
 const NARROW_QUERY = '(max-width: 999px)'
 const COMPACT_QUERY = '(max-width: 859px)'
 
@@ -171,13 +173,27 @@ export default class App extends Component<Record<string, never>, AppState> {
       this.applyProps()
     }
     if (s.uiScale !== prev.uiScale) void window.api.win.setZoom(s.uiScale).catch(() => undefined)
+    if (resolveTheme(s.theme, s.systemDark) !== resolveTheme(prev.theme, prev.systemDark)) this.switchThemeCrisply()
     if (s.activeId !== prev.activeId) this.setState({ activeSlug: null })
     this.renderDoc(false)
-    if (s.ready) this.writer.persist(settingsSnapshot(s))
+    // Not before the session is back: an early write would save an empty tab strip.
+    if (s.restored) this.writer.persist(settingsSnapshot(s))
     if (s.contents !== prev.contents || s.saved !== prev.saved) {
       this.reportUnsaved()
       this.recovery.schedule()
     }
+  }
+
+  /** Hover/press transitions would make each surface change colour at its own speed
+   *  on a theme switch; turn them off until the new theme has painted. */
+  private switchThemeCrisply(): void {
+    const r = this.rootRef.current
+    if (!r) return
+    r.classList.add('smd-theme-switching')
+    const done = (): void => r.classList.remove('smd-theme-switching')
+    requestAnimationFrame(() => requestAnimationFrame(done))
+    // rAF is paused in a hidden window; don't leave transitions off until it shows.
+    setTimeout(done, THEME_SWITCH_MS)
   }
 
   private onPageHide = (): void => {
@@ -328,20 +344,17 @@ export default class App extends Component<Record<string, never>, AppState> {
   private showFolderMenu = (id: string, e: ReactMouseEvent | ReactKeyboardEvent, keyboard: boolean): void =>
     this.openMenu(folderMenu(this.menuDeps, id), e, keyboard, 'Folder actions')
 
-  private showDocMenu = (anchor: HTMLElement, keyboard: boolean): void => {
+  /** A menu hanging from a top-bar button; a second click closes it. */
+  private openAnchoredMenu(anchor: HTMLElement, items: MenuEntry[], label: string, keyboard: boolean): void {
     if (this.state.menu) return this.setState({ menu: null })
     const r = anchor.getBoundingClientRect()
-    this.setState({
-      menu: {
-        x: r.right,
-        y: r.bottom + 6,
-        align: 'end',
-        items: documentMenu(this.menuDeps),
-        label: 'Document actions',
-        keyboard
-      }
-    })
+    this.setState({ menu: { x: r.right, y: r.bottom + 6, align: 'end', items, label, keyboard } })
   }
+
+  private showDocMenu = (anchor: HTMLElement, keyboard: boolean): void =>
+    this.openAnchoredMenu(anchor, documentMenu(this.menuDeps), DOC_MENU, keyboard)
+  private showTabList = (anchor: HTMLElement, keyboard: boolean): void =>
+    this.openAnchoredMenu(anchor, tabListMenu(this.menuDeps, (id) => this.nameOf(id)), TAB_LIST, keyboard)
 
   private readingAnchor: HTMLElement | null = null
   private toggleReading = (anchor: HTMLElement): void => {
@@ -441,9 +454,10 @@ export default class App extends Component<Record<string, never>, AppState> {
       [s.tree, s.looseFiles, s.expanded, s.pinned, s.activeId, s.newPaths, s.root, s.emptyFolders],
       () => buildTree(s, isAgentInstructionFile)
     )
-    const treeProps = this.memo('treeProps', [tree, s.root, s.renaming], () => ({
+    const treeProps = this.memo('treeProps', [tree, s.root, s.renaming, s.restored], () => ({
       tree,
       hasFolder: !!s.root || tree.folders.length > 0,
+      ready: s.restored,
       renaming: s.renaming,
       validateName: this.validateName,
       onRenameCommit: this.commitRename,
@@ -453,7 +467,6 @@ export default class App extends Component<Record<string, never>, AppState> {
       onOpenAll: this.files.openAllInFolder,
       onPinFile: this.files.togglePin,
       onOpenFolder: this.files.openFolderDialog,
-      onOpenFiles: this.files.openFilesDialog,
       onFileContext: this.showFileMenu,
       onFolderContext: this.showFolderMenu
     }))
@@ -511,7 +524,7 @@ export default class App extends Component<Record<string, never>, AppState> {
               <button
                 type="button"
                 className="smd-btn smd-btn--sm"
-                onClick={() => void this.docs.reloadFromDisk(activeId)}
+                onClick={() => void this.docs.reloadFromDisk(activeId, { confirmed: true })}
               >
                 Reload from disk
               </button>
@@ -631,10 +644,11 @@ export default class App extends Component<Record<string, never>, AppState> {
             hasDocument={!!s.activeId}
             sidebarVisible={sidebarVisible && !s.compact}
             viewMode={s.viewMode}
-            outlineOpen={s.outlineOpen}
+            outlineOpen={s.outlineOpen && !s.focusMode}
             outlineAvailable={!s.narrow}
             readingOpen={s.readingOpen}
-            docMenuOpen={!!s.menu && s.menu.align === 'end'}
+            docMenuOpen={s.menu?.label === DOC_MENU}
+            tabListOpen={s.menu?.label === TAB_LIST}
             isMaximized={s.isMaximized}
             hint={this.hint}
             onShowSidebar={this.view.showSidebar}
@@ -642,6 +656,7 @@ export default class App extends Component<Record<string, never>, AppState> {
             onCloseTab={this.closeTab}
             onTabContext={this.showTabMenu}
             onNewDocument={this.newDoc}
+            onTabList={this.showTabList}
             onSetView={this.view.setView}
             onToggleOutline={this.view.toggleOutline}
             onToggleReading={this.toggleReading}
@@ -649,6 +664,9 @@ export default class App extends Component<Record<string, never>, AppState> {
           />
           {s.activeId ? (
             this.renderDocument(s.activeId)
+          ) : !s.restored ? (
+            // Restoring the session: an empty page, not a Welcome that flashes away.
+            <div className="smd-workspace" aria-busy="true" />
           ) : (
             <Welcome
               hint={this.hint}
