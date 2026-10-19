@@ -17,3 +17,5 @@ coverage/
 *.jks
 credentials.json
 *.map
+test-results/
+playwright-report/

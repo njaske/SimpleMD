@@ -359,7 +359,7 @@ button.smd-chip:hover { color: var(--fg); border-color: var(--border-strong); }
 .smd-tab-close {
   width: 20px; height: 20px; padding: 0; border: none; border-radius: 5px; background: transparent;
   color: var(--fg-muted); display: flex; align-items: center; justify-content: center; opacity: 0;
-  transition: opacity var(--dur-fast), background var(--dur-fast);
+  cursor: pointer; transition: opacity var(--dur-fast), background var(--dur-fast);
 }
 .smd-tab:hover .smd-tab-close, .smd-tab.is-active .smd-tab-close, .smd-tab-close:focus-visible { opacity: 1; }
 .smd-tab-close:hover { background: var(--bg-active); color: var(--fg); }

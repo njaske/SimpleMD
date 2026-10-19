@@ -36,7 +36,8 @@
     "test": "node --experimental-strip-types --test \"tests/**/*.test.ts\"",
     "dist": "electron-vite build && electron-builder",
     "dist:win": "electron-vite build && electron-builder --win",
-    "dist:dir": "electron-vite build && electron-builder --dir"
+    "dist:dir": "electron-vite build && electron-builder --dir",
+    "test:e2e": "electron-vite build && playwright test"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",
@@ -63,6 +64,7 @@
     "turndown": "^7.2.4"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.63.0",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",

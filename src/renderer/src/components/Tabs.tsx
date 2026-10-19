@@ -109,6 +109,7 @@ function Tabs({ tabs, onSelect, onClose, onContext, onNew, newLabel, onList, lis
     else if (e.key === 'End') focusTab(tabs.length - 1)
     else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) onContext(tab.id, e, true)
     else if (e.key === 'Enter' || e.key === ' ') onSelect(tab.id)
+    else if (e.key === 'Delete') onClose(tab.id)
     else return
     e.preventDefault()
   }
@@ -132,6 +133,7 @@ function Tabs({ tabs, onSelect, onClose, onContext, onNew, newLabel, onList, lis
             className={'smd-tab' + (tab.active ? ' is-active' : '') + (tab.dirty ? ' smd-tab--dirty' : '')}
             title={tab.path || tab.name}
             aria-label={`${tab.name}${tab.dirty ? ', unsaved' : ''}${tab.pinned ? ', pinned' : ''}`}
+            aria-keyshortcuts="Delete"
             onClick={() => onSelect(tab.id)}
             onKeyDown={(e) => onKeyDown(e, i, tab)}
             onContextMenu={(e) => {
@@ -152,11 +154,11 @@ function Tabs({ tabs, onSelect, onClose, onContext, onNew, newLabel, onList, lis
             <span className="smd-tab-name">{tab.label}</span>
             <span className="smd-tab-end">
               {tab.dirty && <span className="smd-tab-dirty" aria-hidden="true" />}
-              <button
-                type="button"
-                tabIndex={-1}
+              {/* A button inside role="tab" can't be announced properly, so the × is
+                  for the mouse only; keyboard users press Delete (or Mod+W) on the tab. */}
+              <span
+                aria-hidden="true"
                 className="smd-tab-close"
-                aria-label={`Close ${tab.name}`}
                 title="Close tab"
                 onClick={(e) => {
                   e.stopPropagation()
@@ -164,7 +166,7 @@ function Tabs({ tabs, onSelect, onClose, onContext, onNew, newLabel, onList, lis
                 }}
               >
                 <CloseIcon size={13} sw={1.8} />
-              </button>
+              </span>
             </span>
           </div>
         ))}
