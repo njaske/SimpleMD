@@ -11,10 +11,12 @@ import Sidebar from '@/components/Sidebar'
 import TopBar from '@/components/TopBar'
 import Outline from '@/components/Outline'
 import StatusBar from '@/components/StatusBar'
+// First paint when no tabs are open, so it is part of the startup chunk.
+import Welcome from '@/components/Welcome'
 import AppOverlays from '@/app/AppOverlays'
 import DocumentView from '@/app/DocumentView'
 import LazyBoundary from '@/app/LazyBoundary'
-import { ContextMenu, Welcome, prefetchLazyParts } from '@/app/lazyParts'
+import { ContextMenu, prefetchLazyParts } from '@/app/lazyParts'
 import { ReaderBridge } from '@/app/readerBridge'
 import { EditorLink } from '@/app/editorLink'
 import { createReadingCommands } from '@/app/reading'
@@ -180,6 +182,9 @@ export default class App extends Component<Record<string, never>, AppState> {
     }
     if (s.uiScale !== prev.uiScale) void window.api.win.setZoom(s.uiScale).catch(() => undefined)
     if (resolveTheme(s.theme, s.systemDark) !== resolveTheme(prev.theme, prev.systemDark)) this.switchThemeCrisply()
+    if (s.openTabs !== prev.openTabs) {
+      for (const id of prev.openTabs) if (!s.openTabs.includes(id)) this.bridge.closed(id)
+    }
     if (s.activeId !== prev.activeId) {
       this.bridge.left(prev.activeId)
       this.setState({ activeSlug: null, renderFixes: [], blockedImages: 0 })
@@ -227,6 +232,8 @@ export default class App extends Component<Record<string, never>, AppState> {
   /** Esc leaves focus mode once every overlay has had its turn (they stop the event). */
   private onEscape = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape' || e.defaultPrevented) return
+    // A menu still loading its chunk is not on screen yet: Esc means don't open it.
+    if (this.menus.cancel()) return
     if (this.state.sidebarPeek) this.setState({ sidebarPeek: false })
     else if (this.state.focusMode) this.setState({ focusMode: false })
   }
@@ -438,11 +445,6 @@ export default class App extends Component<Record<string, never>, AppState> {
   private closeFind = (): void => this.setState({ find: null })
   private closeMenu = (): void => this.setState({ menu: null })
   private loadImages = (): void => this.reader.loadBlockedImages()
-  /** Status chip: the next change, or from Edit (no reader) to Split to see them. */
-  private showChanges = (): void => {
-    if (this.state.viewMode === 'edit') this.view.setView('split')
-    else this.bridge.nextChange()
-  }
   private forgetRecent = (id: string): void => this.setState((s) => ({ recents: s.recents.filter((r) => r !== id) }))
 
   // ---- render --------------------------------------------------------------------
@@ -588,7 +590,7 @@ export default class App extends Component<Record<string, never>, AppState> {
         onLoadImages={this.loadImages}
         changes={s.changes[id] ?? 0}
         changesHint={reading ? `Next change (${this.hint('Alt+N')})` : 'Show the changes in Split view'}
-        onChanges={this.showChanges}
+        onChanges={this.bridge.nextChange}
       />
     )
   }
@@ -657,9 +659,7 @@ export default class App extends Component<Record<string, never>, AppState> {
             // Restoring the session: an empty page, not a Welcome that flashes away.
             <div className="smd-workspace" aria-busy="true" />
           ) : (
-            <LazyBoundary>
-              <Suspense fallback={<div className="smd-workspace" aria-busy="true" />}>
-                <Welcome
+            <Welcome
               hint={this.hint}
               recentFiles={this.memo('welcomeRecents', [s.recents, this.index, s.root], () =>
                 s.recents.map((id) => ({
@@ -676,9 +676,7 @@ export default class App extends Component<Record<string, never>, AppState> {
               onOpenRecentFile={(id) => void this.docs.openFile(id)}
               onOpenRecentFolder={(p) => void this.files.openRecentFolder(p)}
               onClearRecents={this.clearRecents}
-                />
-              </Suspense>
-            </LazyBoundary>
+            />
           )}
           {this.renderStatus()}
         </div>

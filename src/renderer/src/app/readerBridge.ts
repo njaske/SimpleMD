@@ -6,6 +6,8 @@
 import type { LineRange } from '@/lib/ranges'
 import type { RenderInfo } from '@/lib/reader/ReaderController'
 import { toggleTaskAt } from '@/lib/reader/tasks'
+import { formatShortcut } from '@/lib/logic/platform'
+import { ChangeCursor, changeGroups } from './changeNav'
 import type { AppHost, DiskReload } from './host'
 import { reason } from './host'
 import { baseName, isUntitled, without } from './model'
@@ -32,6 +34,11 @@ export class ReaderBridge {
   /** Text a task-box save is about to write, per document. */
   private taskTarget = new Map<string, string>()
   private saving: Promise<void> = Promise.resolve()
+  /** The document the status bar's fixes / blocked-image chips describe. */
+  private reportedFor: string | null = null
+  private readonly cursor = new ChangeCursor()
+  /** The ranges the reader marked last, so new ones restart the Next cursor. */
+  private markedRanges: LineRange[] | null = null
 
   // Plain fields (no parameter properties) keep this module loadable by node:test.
   constructor(host: AppHost, load: () => Promise<DiffLines> = loadChanges) {
@@ -51,9 +58,14 @@ export class ReaderBridge {
     const s = this.host.state()
     const id = s.activeId
     if (!id || s.viewMode === 'edit') return
-    if (!sameList(s.renderFixes, info.fixes)) this.host.update({ renderFixes: [...info.fixes] })
+    // State may still hold the previous document's values (its reset is queued), so
+    // the first report for a document is always written, even when it looks equal.
+    const fresh = this.reportedFor !== id
+    this.reportedFor = id
     const blocked = info.blockedImages ?? 0
-    if (s.blockedImages !== blocked) this.host.update({ blockedImages: blocked })
+    if (fresh || !sameList(s.renderFixes, info.fixes) || s.blockedImages !== blocked) {
+      this.host.update({ renderFixes: [...info.fixes], blockedImages: blocked })
+    }
     this.mark(id)
   }
 
@@ -103,7 +115,14 @@ export class ReaderBridge {
 
   /** The user moved away from `id`: changes it has shown are done with. */
   left(id: string | null): void {
+    this.reportedFor = null
+    this.cursor.reset()
     if (id && this.seen.has(id)) this.forget(id)
+  }
+
+  /** The tab of `id` closed: its tracked changes (and the texts kept for them) go. */
+  closed(id: string): void {
+    this.forget(id)
   }
 
   /** The user edited `id`: line marks no longer line up, so drop them. */
@@ -117,15 +136,29 @@ export class ReaderBridge {
     return !!id && (this.host.state().changes[id] ?? 0) > 0
   }
 
+  /** Next (Alt+N): from change to change, wrapping. Edit view has no reader, so it
+   *  opens Split first and shows the first change there. */
   nextChange = (): void => {
-    if (!this.host.reader.revealNextChange()) this.host.toast('No changes to show.')
+    const s = this.host.state()
+    if (s.viewMode === 'edit' && this.hasChanges(s.activeId)) {
+      this.host.update({ viewMode: 'split' }, () => this.revealNext())
+      return
+    }
+    this.revealNext()
   }
 
   dismiss = (): void => {
     const id = this.host.state().activeId
     if (!id) return
     this.host.reader.clearChanges()
+    this.cursor.reset()
     this.forget(id)
+  }
+
+  private revealNext(): void {
+    const article = this.host.reader.getArticle()
+    const scroller = article?.closest<HTMLElement>('.smd-reader') ?? null
+    if (!article || !scroller || !this.cursor.next(article, scroller)) this.host.toast('No changes to show.')
   }
 
   /** Scroll to the end; a growing file then keeps the reader pinned there. */
@@ -169,13 +202,20 @@ export class ReaderBridge {
     )
   }
 
-  /** Mark the tracked ranges in the painted article and record how many blocks. */
+  /** Mark the tracked ranges in the painted article and count the changes the way
+   *  they look: a run of adjacent marked blocks is one. */
   private mark(id: string): void {
     const ranges = this.ranges.get(id)
     if (!ranges) return
-    const count = this.host.reader.showChanges(ranges)
-    if (!count) return
+    const blocks = this.host.reader.showChanges(ranges)
+    if (!blocks) return
+    if (this.markedRanges !== ranges) {
+      this.markedRanges = ranges
+      this.cursor.reset()
+    }
     this.seen.add(id)
+    const article = this.host.reader.getArticle()
+    const count = (article ? changeGroups(article).length : 0) || Math.min(blocks, ranges.length)
     if (this.host.state().changes[id] !== count) this.host.update((s) => ({ changes: { ...s.changes, [id]: count } }))
   }
 
@@ -184,6 +224,7 @@ export class ReaderBridge {
     this.latest.delete(id)
     this.ranges.delete(id)
     this.seen.delete(id)
+    if (this.reportedFor === id) this.reportedFor = null
     if (this.host.state().changes[id] !== undefined) this.host.update((s) => ({ changes: without(s.changes, id) }))
   }
 
@@ -203,8 +244,9 @@ export class ReaderBridge {
       this.host.toast('Saved')
     } catch (err) {
       const why = reason(err)
+      const save = formatShortcut('Mod+S', this.host.platform)
       this.host.toast(
-        `Couldn't save ${baseName(id)}${why ? ` (${why})` : ''}. The change is kept as an unsaved edit.`
+        `Couldn't save ${baseName(id)}${why ? ` (${why})` : ''}. The change is kept as an unsaved edit; press ${save} to try again.`
       )
     } finally {
       if (this.taskTarget.get(id) === text) this.taskTarget.delete(id)

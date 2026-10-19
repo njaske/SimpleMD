@@ -30,7 +30,8 @@ function fixesLabel(n: number): string {
   return `Fixed ${n} ${n === 1 ? 'issue' : 'issues'} for display`
 }
 
-/** The chip and its list of repairs (the file itself is never changed). */
+/** The chip and its list of repairs (the file itself is never changed). The list is a
+ *  plain disclosure under the chip; Esc or a press outside folds it. */
 function FixesChip({ fixes }: { fixes: readonly string[] }) {
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement>(null)
@@ -54,7 +55,8 @@ function FixesChip({ fixes }: { fixes: readonly string[] }) {
         {fixesLabel(fixes.length)}
       </button>
       {open && (
-        <div id={FIXES_ID} className="smd-fixes-pop smd-pop" role="dialog" aria-label="Fixed for display">
+        // A disclosure, not a dialog: focus stays on the chip, which toggles it.
+        <div id={FIXES_ID} className="smd-fixes-pop smd-pop" role="region" aria-label="Fixed for display">
           <p className="smd-fixes-lead">Shown with these small repairs. The file itself is unchanged.</p>
           <ul>
             {fixes.map((f) => (

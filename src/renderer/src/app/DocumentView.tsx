@@ -1,7 +1,8 @@
 // The open document: conflict bar, then the panes. Edit and Split show the format bar
-// over the editor; Read and Split show the reader with its find bar and change bar
-// floating inside. Read view stays just the document.
-import { Suspense, type ReactNode } from 'react'
+// over the editor; Read and Split show the reader, with the change bar as a slim strip
+// above it (never over the text) and the find bar floating at its top-right. Read view
+// stays just the document.
+import { Suspense, useCallback, useLayoutEffect, useRef, type ReactNode } from 'react'
 import type { Platform, ViewMode } from '@shared/types'
 import type { EditorJump } from '@/components/CodeEditor'
 import ChangeBar from '@/components/ChangeBar'
@@ -25,7 +26,7 @@ export interface DocumentViewProps {
   /** Unsaved edits while the file changed on disk. */
   conflict: boolean
   find: FindState | null
-  /** Blocks marked as changed (0 hides the change bar). */
+  /** Changes marked since the file reloaded (0 hides the change bar). */
   changes: number
   reader: ReaderController
   outline: ReactNode
@@ -99,12 +100,36 @@ function EditorFailed() {
   )
 }
 
+/** When the change bar appears it takes its height from the reader; a reader that was
+ *  at the very end (following a file an agent is writing) stays at the end. */
+function useEndKept(scroller: { current: HTMLDivElement | null }, barShown: boolean): void {
+  useLayoutEffect(() => {
+    const el = scroller.current
+    const bar = el?.parentElement?.querySelector<HTMLElement>('.smd-changebar')
+    if (!el || !bar || !barShown) return
+    if (el.scrollHeight - el.scrollTop - el.clientHeight <= bar.offsetHeight + 2) el.scrollTop = el.scrollHeight
+  }, [scroller, barShown])
+}
+
 function ReaderPane(p: DocumentViewProps) {
+  const scroller = useRef<HTMLDivElement | null>(null)
+  const { setReaderEl } = p
+  const setRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      scroller.current = el
+      setReaderEl(el)
+    },
+    [setReaderEl]
+  )
+  useEndKept(scroller, p.changes > 0)
   return (
-    // Positioned pane: the find bar and change bar float inside it.
+    // Positioned pane: the find bar floats inside it.
     <div className="smd-reader-pane">
+      {p.changes > 0 && (
+        <ChangeBar count={p.changes} platform={p.platform} onNext={p.onNextChange} onDismiss={p.onDismissChanges} />
+      )}
       <div
-        ref={p.setReaderEl}
+        ref={setRef}
         className="smd-reader"
         role="article"
         tabIndex={0}
@@ -116,9 +141,6 @@ function ReaderPane(p: DocumentViewProps) {
             <FindBar key={p.find.key} reader={p.reader} initialQuery={p.find.seed} onClose={p.onCloseFind} />
           </Suspense>
         </LazyBoundary>
-      )}
-      {p.changes > 0 && (
-        <ChangeBar count={p.changes} platform={p.platform} onNext={p.onNextChange} onDismiss={p.onDismissChanges} />
       )}
     </div>
   )

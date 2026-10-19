@@ -1,6 +1,6 @@
 // Everything the first paint of a document doesn't need loads on demand, keeping the
 // startup chunk small: the editor and its format bar, the find bar, the palette,
-// Settings, the Aa popover, dialogs, the Welcome screen, exports and the diff module.
+// Settings, the Aa popover, dialogs, context menus, exports and the diff module.
 // prefetchLazyParts() warms them all while the app is idle, so first use is instant.
 import { lazy } from 'react'
 
@@ -12,8 +12,8 @@ const settings = () => import('@/components/SettingsDialog')
 const reading = () => import('@/components/ReadingPopover')
 const prompts = () => import('@/components/Prompts')
 const recovery = () => import('@/components/RecoveryPrompt')
-const welcome = () => import('@/components/Welcome')
-const contextMenu = () => import('@/components/ContextMenu')
+/** Menus wait for this and their builders together, so they open in one go. */
+export const contextMenu = () => import('@/components/ContextMenu')
 const menus = () => import('./menus')
 
 export const CodeEditor = lazy(editor)
@@ -23,7 +23,6 @@ export const CommandPalette = lazy(palette)
 export const SettingsDialog = lazy(settings)
 export const ReadingPopover = lazy(reading)
 export const RecoveryPrompt = lazy(recovery)
-export const Welcome = lazy(welcome)
 export const ContextMenu = lazy(contextMenu)
 export const ConfirmDialog = lazy(() => prompts().then((m) => ({ default: m.ConfirmDialog })))
 export const UnsavedDialog = lazy(() => prompts().then((m) => ({ default: m.UnsavedDialog })))
@@ -47,7 +46,6 @@ const WARM: readonly Loader[] = [
   formatBar,
   settings,
   recovery,
-  welcome,
   loadExport
 ]
 

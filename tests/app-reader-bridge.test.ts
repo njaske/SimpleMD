@@ -34,7 +34,7 @@ async function setup(over: Parameters<typeof fakeHost>[0] = {}): Promise<{ fake:
         return reader.marked
       },
       clearChanges: () => void reader.cleared++,
-      revealNextChange: () => true
+      getArticle: () => null
     },
     renderDoc: () => void reader.repaints++
   })
@@ -51,6 +51,18 @@ const lineDiff = async () => (before: string, after: string): LineRange[] => {
 }
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
+
+/** Like React: updates queue up and apply in order on flush(). */
+function batched(fake: FakeHost): { flush: () => void } {
+  const queue: Parameters<FakeHost['host']['update']>[] = []
+  const apply = fake.host.update
+  fake.host.update = (u, then) => void queue.push([u, then])
+  return {
+    flush: () => {
+      for (const [u, then] of queue.splice(0)) apply(u, then)
+    }
+  }
+}
 
 const TASKS = '- [ ] one\n- [ ] two\n'
 
@@ -139,7 +151,7 @@ describe('clickable task boxes', () => {
 
     assert.equal(fake.state().saved['/a.md'], TASKS)
     assert.notEqual(fake.state().contents['/a.md'], TASKS)
-    assert.equal(fake.toasts.at(-1), "Couldn't save a.md (EACCES: permission denied). The change is kept as an unsaved edit.")
+    assert.equal(fake.toasts.at(-1), "Couldn't save a.md (EACCES: permission denied). The change is kept as an unsaved edit; press Ctrl+S to try again.")
   })
 
   it('repaints instead of editing when the click is stale (not a task line)', async () => {
@@ -161,6 +173,70 @@ describe('render info', () => {
 
     assert.deepEqual(fake.state().renderFixes, ['Closed an unfinished code block'])
     assert.equal(fake.state().blockedImages, 2)
+  })
+
+  it('keeps the chips when the next document reports the same fixes and blocked images', async () => {
+    // Arrange: A's values are in state; the App has switched to B.
+    const fixes = ['Closed an unfinished code block']
+    const { fake } = await setup({ activeId: '/b.md', viewMode: 'read', renderFixes: fixes, blockedImages: 1 })
+    const bridge = new bridgeMod.ReaderBridge(fake.host, lineDiff)
+    bridge.onRenderInfo({ fixes, blockedImages: 1 })
+    const react = batched(fake)
+
+    // Act: the App's switch (reset queued), then B's paint, applied in React's order.
+    bridge.left('/a.md')
+    fake.host.update({ renderFixes: [], blockedImages: 0 })
+    bridge.onRenderInfo({ fixes, blockedImages: 1 })
+    react.flush()
+
+    // Assert
+    assert.deepEqual(fake.state().renderFixes, fixes)
+    assert.equal(fake.state().blockedImages, 1)
+  })
+
+  it('does not rewrite the chips on a repaint of the same document with the same info', async () => {
+    const { fake } = await setup({ activeId: '/a.md', viewMode: 'read' })
+    const bridge = new bridgeMod.ReaderBridge(fake.host, lineDiff)
+    bridge.onRenderInfo({ fixes: ['x'], blockedImages: 0 })
+    const before = fake.state()
+
+    bridge.onRenderInfo({ fixes: ['x'], blockedImages: 0 })
+
+    assert.equal(fake.state(), before)
+  })
+})
+
+describe('closing a tab', () => {
+  const open = { activeId: '/a.md', viewMode: 'read' as const, openTabs: ['/a.md', '/b.md'] }
+
+  it('forgets a background document\'s changes, so a reopened tab starts fresh', async () => {
+    // Arrange: /b.md changes while /a.md is in front, so the reader never showed them.
+    const { fake, reader } = await setup(open)
+    const bridge = new bridgeMod.ReaderBridge(fake.host, lineDiff)
+    bridge.beforeReload([{ id: '/b.md', before: 'one\ntwo', after: 'one\nTWO' }])()
+    await tick()
+    assert.equal(fake.state().changes['/b.md'], 1)
+
+    // Act: close it, reopen it and let it change again.
+    bridge.closed('/b.md')
+    fake.host.update({ activeId: '/b.md' })
+    bridge.beforeReload([{ id: '/b.md', before: 'one\nTWO', after: 'one\nTWO\nthree' }])()
+    await tick()
+
+    // Assert: only the new change, measured from what the reopened tab showed.
+    assert.equal(fake.state().changes['/b.md'], 1)
+    assert.deepEqual(reader.shown.at(-1), [{ from: 2, to: 3 }])
+  })
+
+  it('drops the closed tab\'s count right away', async () => {
+    const { fake } = await setup(open)
+    const bridge = new bridgeMod.ReaderBridge(fake.host, lineDiff)
+    bridge.beforeReload([{ id: '/b.md', before: 'x', after: 'y' }])()
+    await tick()
+
+    bridge.closed('/b.md')
+
+    assert.equal(fake.state().changes['/b.md'], undefined)
   })
 })
 
