@@ -13,59 +13,38 @@ import {
   keymap,
   lineNumbers,
   rectangularSelection,
+  type Command,
   type KeyBinding
 } from '@codemirror/view'
-import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
+import { defaultKeymap, history, historyKeymap, selectParentSyntax, toggleBlockComment, toggleComment } from '@codemirror/commands'
 import { bracketMatching, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting } from '@codemirror/language'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
-import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
+import { markdownLanguage } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
 import { editorKeymap } from './commands'
 import { smartPaste } from './paste'
 import { imageHandling, type ImageHooks } from './images'
 import { editorHighlight, editorTheme } from './theme'
+import { markdownWithFrontmatter } from './frontmatter'
+import { createSearchPanel } from './searchPanel'
+import { strokeIcon } from './domIcons'
 
-// Default bindings the app (or our own keymap) owns: Mod+/ is the shortcuts sheet,
-// Mod+I is italic, Shift+Alt+A has no meaning in Markdown.
-const RESERVED_KEYS = new Set(['Mod-/', 'Mod-i', 'Alt-A'])
-const defaults: readonly KeyBinding[] = defaultKeymap.filter((b) => !b.key || !RESERVED_KEYS.has(b.key))
+// Default bindings the app (or our own keymap) owns: Mod+/ is the shortcuts sheet, Mod+I
+// is italic, and HTML block comments (Shift+Alt+A) mean nothing in Markdown. Matched by
+// command rather than key so a respelt key can't bring them back.
+const RESERVED_COMMANDS: ReadonlySet<Command> = new Set([toggleComment, selectParentSyntax, toggleBlockComment])
+export const appDefaultKeymap: readonly KeyBinding[] = defaultKeymap.filter((b) => !b.run || !RESERVED_COMMANDS.has(b.run))
 
-// The search panel's words, in sentence case.
-const PHRASES = {
-  next: 'Next',
-  previous: 'Previous',
-  all: 'All',
-  'match case': 'Match case',
-  regexp: 'Regex',
-  'by word': 'Whole word',
-  replace: 'Replace',
-  'replace all': 'Replace all',
-  close: 'Close',
-  'Go to line': 'Go to line',
-  go: 'Go'
-}
-
-const SVG_NS = 'http://www.w3.org/2000/svg'
+// The go-to-line prompt's words, in sentence case and named like the find panel's.
+const PHRASES = { 'Go to line': 'Go to line', go: 'Go', close: 'Close (Esc)' }
 
 /** A small chevron for the fold gutter, drawn like the app's stroke icons. */
 function foldMarker(open: boolean): HTMLElement {
   const wrap = document.createElement('span')
   wrap.className = open ? 'is-open' : 'is-folded'
   wrap.title = open ? 'Fold' : 'Unfold'
-  const svg = document.createElementNS(SVG_NS, 'svg')
-  svg.setAttribute('viewBox', '0 0 24 24')
-  svg.setAttribute('width', '12')
-  svg.setAttribute('height', '12')
-  svg.setAttribute('fill', 'none')
-  svg.setAttribute('stroke', 'currentColor')
-  svg.setAttribute('stroke-width', '2')
-  svg.setAttribute('stroke-linecap', 'round')
-  svg.setAttribute('stroke-linejoin', 'round')
-  const path = document.createElementNS(SVG_NS, 'path')
-  path.setAttribute('d', open ? 'M6 9l6 6 6-6' : 'M9 6l6 6-6 6')
-  svg.appendChild(path)
-  wrap.appendChild(svg)
+  wrap.appendChild(strokeIcon(open ? 'chevronDown' : 'chevronRight', 12, 2))
   return wrap
 }
 
@@ -97,12 +76,12 @@ export function editorExtensions(setup: EditorSetup): Extension[] {
     crosshairCursor(),
     highlightActiveLine(),
     highlightSelectionMatches(),
-    search({ top: true }),
+    search({ top: true, createPanel: createSearchPanel }),
     EditorView.lineWrapping,
     editorKeymap(),
-    keymap.of([...closeBracketsKeymap, ...defaults, ...searchKeymap, ...historyKeymap, ...foldKeymap]),
+    keymap.of([...closeBracketsKeymap, ...appDefaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap]),
     // Our paste handling replaces lang-markdown's URL-over-selection paste.
-    markdown({ base: markdownLanguage, codeLanguages: languages, pasteURLAsLink: false }),
+    markdownWithFrontmatter({ base: markdownLanguage, codeLanguages: languages, pasteURLAsLink: false }),
     imageHandling(setup.images),
     smartPaste(),
     editorTheme,

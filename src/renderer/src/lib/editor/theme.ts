@@ -3,6 +3,8 @@
 import { EditorView } from '@codemirror/view'
 import { HighlightStyle } from '@codemirror/language'
 import { tags as t } from '@lezer/highlight'
+import { frontmatterTags } from './frontmatter'
+import { iconMaskUrl } from './domIcons'
 
 const v = (name: string, fallback: string): string => `var(--${name}, ${fallback})`
 
@@ -50,23 +52,16 @@ const field = {
   transition: `border-color ${c.fast}, box-shadow ${c.fast}`
 }
 
-const searchPanel = {
+// The find panel's layout lives in editor-ui.css (it needs container queries); here are
+// the panel surfaces, the go-to-line dialog and the match marks.
+const panels = {
   '.cm-panels': { backgroundColor: c.bg, color: c.fg, fontFamily: c.ui },
   '.cm-panels.cm-panels-top': { borderBottom: `1px solid ${c.border}` },
   '.cm-panels.cm-panels-bottom': { borderTop: `1px solid ${c.border}` },
-  '.cm-panel.cm-search': {
-    position: 'relative',
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: '6px',
-    padding: '8px 44px 8px 12px',
-    fontSize: '12.5px'
-  },
-  '.cm-panel.cm-search br': { display: 'block', content: '""', flexBasis: '100%', height: 0 },
-  '.cm-panel.cm-search label': { display: 'inline-flex', alignItems: 'center', gap: '5px', color: c.muted, fontSize: '12px', margin: '0 4px', cursor: 'pointer' },
-  '.cm-panel.cm-search input[type=checkbox]': { accentColor: c.accent, margin: 0, width: '13px', height: '13px' },
-  '.cm-textfield': { ...field, minWidth: '200px', margin: 0, fontSize: '12.5px' },
+  '.cm-dialog': { padding: '8px 44px 8px 12px', fontSize: '12.5px' },
+  '.cm-dialog form': { display: 'flex', alignItems: 'center', gap: '6px', margin: 0 },
+  '.cm-dialog label': { display: 'inline-flex', alignItems: 'center', gap: '6px', color: c.muted, fontSize: '12px' },
+  '.cm-textfield': { ...field, width: '96px', margin: 0, fontSize: '12.5px' },
   '.cm-textfield:focus': { borderColor: c.accent, boxShadow: `0 0 0 3px ${c.accentSoft}` },
   '.cm-button': {
     ...field,
@@ -79,30 +74,41 @@ const searchPanel = {
   },
   '.cm-button:hover': { backgroundColor: c.hover },
   '.cm-button:active': { backgroundImage: 'none', backgroundColor: c.active },
-  '.cm-button:focus-visible, .cm-panel.cm-search [name=close]:focus-visible': { outline: `2px solid ${c.focus}`, outlineOffset: '1px' },
-  '.cm-panel.cm-search [name=close]': {
-    position: 'absolute',
+  '.cm-button:focus-visible, .cm-dialog-close:focus-visible': { outline: `2px solid ${c.focus}`, outlineOffset: '1px' },
+  // CodeMirror draws a text "×"; hide it and show the app's stroke icon, as the find panel does.
+  '.cm-dialog-close': {
     top: '8px',
     right: '10px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     width: '26px',
     height: '26px',
     padding: 0,
-    border: 'none',
     borderRadius: c.radiusS,
     background: 'transparent',
     color: c.muted,
-    fontSize: '17px',
-    lineHeight: '26px',
+    fontSize: 0,
     cursor: 'pointer'
   },
-  '.cm-panel.cm-search [name=close]:hover': { backgroundColor: c.hover, color: c.fg },
+  '.cm-dialog-close::before': {
+    content: '""',
+    width: '16px',
+    height: '16px',
+    backgroundColor: 'currentColor',
+    maskImage: iconMaskUrl('close'),
+    maskRepeat: 'no-repeat',
+    maskSize: '16px 16px'
+  },
+  '.cm-dialog-close:hover': { backgroundColor: c.hover, color: c.fg },
   '.cm-searchMatch': { backgroundColor: c.mark, borderRadius: '2px' },
   '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: c.sel, outline: `1px solid ${c.accent}` },
   '.cm-selectionMatch': { backgroundColor: c.accentSoft }
 }
 
 export const editorTheme = EditorView.theme({
-  '&': { height: '100%', color: c.fg, backgroundColor: c.bg, fontSize: 'var(--smd-editor-size, 14px)' },
+  // --smd-editor-measure lets the find panel (editor-ui.css) line up with the column.
+  '&': { height: '100%', color: c.fg, backgroundColor: c.bg, fontSize: 'var(--smd-editor-size, 14px)', '--smd-editor-measure': EDITOR_MEASURE },
   // The caret and active line show focus; the app's global focus ring would outline the page.
   '&.cm-focused, .cm-content:focus-visible': { outline: 'none' },
   '.cm-scroller': {
@@ -134,7 +140,7 @@ export const editorTheme = EditorView.theme({
   '.cm-nonmatchingBracket': { backgroundColor: 'transparent', color: c.accent },
   '.cm-specialChar': { color: c.accent },
   '.cm-tooltip': { backgroundColor: c.elev, color: c.fg, border: `1px solid ${c.border}`, borderRadius: c.radiusS, boxShadow: c.shadow, fontFamily: c.ui },
-  ...searchPanel
+  ...panels
 })
 
 // Code colours mixed toward the text colour so they stay readable on paper and ink alike.
@@ -165,5 +171,8 @@ export const editorHighlight = HighlightStyle.define([
   { tag: [t.attributeName, t.propertyName], color: v('tok-attr', c.muted) },
   { tag: [t.variableName, t.definition(t.variableName)], color: c.fg },
   { tag: [t.operator, t.punctuation, t.bracket, t.separator], color: v('tok-punc', c.muted) },
-  { tag: t.meta, color: c.faint }
+  { tag: t.meta, color: c.faint },
+  // Front matter is metadata, not prose: quiet, with its keys a touch stronger.
+  { tag: frontmatterTags.content, color: c.muted },
+  { tag: frontmatterTags.key, color: c.muted, fontWeight: '600' }
 ])

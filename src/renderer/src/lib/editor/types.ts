@@ -34,4 +34,6 @@ export interface EditorHandle {
   scrollToLine(line: number): void
   /** Subscribe to user scrolling. Returns an unsubscribe function. */
   onScroll(cb: () => void): () => void
+  /** Open the find and replace panel (prefilled from the selection) and focus its field. */
+  openSearch(): void
 }
