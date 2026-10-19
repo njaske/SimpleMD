@@ -5,7 +5,7 @@ import { escapeHtml } from './markdown/escape'
 import { isKatexReady, isKatexSettled, loadKatex, needsKatex } from './markdown/math'
 import { renderSource } from './markdown/pipeline'
 import type { ChunkFootnotes } from './markdown/footnotes'
-import { collectRefDefs, planFootnotes, PROGRESSIVE_CHARS, splitForProgressive } from './markdown/progressive'
+import { planDocument, PROGRESSIVE_CHARS } from './markdown/progressive'
 import { sanitizeHtml } from './markdown/sanitize'
 
 // Public entry to the Markdown renderer. The pipeline lives in lib/markdown/:
@@ -118,15 +118,36 @@ export function isLargeDocument(md: string): boolean {
   return md.length > PROGRESSIVE_CHARS && md.length <= MAX_RENDER_CHARS
 }
 
+// Repaints of the same text (theme switch, "Load images", coming back to the tab)
+// reuse the last plan instead of scanning a multi-MB file again.
+let lastPlan: { md: string; chunks: readonly RenderChunk[] } | null = null
+
 /** The chunks of a large document, in order; render each with renderMarkdown. */
-export function planProgressive(md: string): RenderChunk[] {
-  const chunks = splitForProgressive(md)
-  const notes = planFootnotes(md, chunks)
-  const appendix = [collectRefDefs(md), notes?.defs ?? ''].filter(Boolean).join('\n\n')
-  return chunks.map((chunk, i) => ({
+export function planProgressive(md: string): readonly RenderChunk[] {
+  if (lastPlan?.md === md) return lastPlan.chunks
+  const { chunks, refDefs, footnotes } = planDocument(md)
+  const appendix = [refDefs, footnotes?.defs ?? ''].filter(Boolean).join('\n\n')
+  const planned = chunks.map((chunk, i) => ({
     src: chunk.src,
-    options: { lineOffset: chunk.lineOffset, frontMatter: i === 0, appendix, footnotes: notes?.chunks[i] ?? null, chunk: true }
+    options: { lineOffset: chunk.lineOffset, frontMatter: i === 0, appendix, footnotes: footnotes?.chunks[i] ?? null, chunk: true }
   }))
+  lastPlan = { md, chunks: planned }
+  return planned
+}
+
+/** True when two planned chunks render to the same HTML, so a repaint can keep the
+ *  DOM it already built for that chunk. */
+export function sameChunk(a: RenderChunk, b: RenderChunk): boolean {
+  if (a === b) return true
+  const x = a.options
+  const y = b.options
+  return (
+    a.src === b.src &&
+    x.lineOffset === y.lineOffset &&
+    x.frontMatter === y.frontMatter &&
+    x.appendix === y.appendix &&
+    JSON.stringify(x.footnotes ?? null) === JSON.stringify(y.footnotes ?? null)
+  )
 }
 
 /** Load whatever optional renderers (KaTeX, highlight.js) this document needs.

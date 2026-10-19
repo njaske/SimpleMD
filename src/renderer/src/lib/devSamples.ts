@@ -119,6 +119,57 @@ flowchart LR
 
 Diagrams sit inline with the rest of your document.`
 
+// Exercises the reader's edge cases: images that can't load or are blocked (in
+// figures, inline and inside diagrams), and a table with hyphenated row labels.
+const IMAGES = `# Images and Diagrams
+
+A local screenshot that isn't next to this note:
+
+![Settings screen](./shots/settings.png)
+
+An inline icon ![logo](icon.png) and a remote badge ![build](https://img.shields.io/badge/build-passing-green).
+
+![Architecture](https://example.org/diagram.png)
+
+## A diagram with pictures
+
+\`\`\`mermaid
+flowchart LR
+  U@{ img: "https://example.org/track.png", label: "User", pos: "b", h: 48, constraint: "on" } --> A[App]
+  A --> S[(Sync service)]
+  S --> C["<img src='https://example.org/t2.png' width='20'/> Cloud"]
+\`\`\`
+
+## Write strategies
+
+| Strategy | How it works | Best for |
+|---|---|---|
+| Write-through | Every write goes to the cache and the store at the same time. | Read-heavy data that must stay fresh |
+| Write-behind | Writes land in the cache and reach the store later, in batches. | Write-heavy counters and logs |
+| Read-through | The cache loads missing keys from the store on first read. | Lookups with a hot working set |
+`
+
+/** About 2 MB of agent log, to see progressive rendering (preview with ?large). */
+function agentLog(): string {
+  const step = (i: number): string =>
+    [
+      `## Step ${i}`,
+      '',
+      `Ran the checks for task ${i} and recorded what changed.`,
+      '',
+      '```bash',
+      `npm test -- --grep "case ${i}"`,
+      '```',
+      '',
+      ...Array.from({ length: 10 }, (_, j) => `- line ${j}: updated \`src/file-${j}.ts\` and moved on`),
+      '',
+      ...(i % 400 === 399 ? ['```mermaid', 'flowchart LR', `  S${i}[Step ${i}] --> N[Next]`, '```', ''] : [])
+    ].join('\n')
+  return '# Long Agent Log\n\n' + Array.from({ length: 3600 }, (_, i) => step(i)).join('\n')
+}
+
+const LARGE = typeof location !== 'undefined' && new URLSearchParams(location.search).has('large')
+
 const SHOWCASE = `# Neural Networks — Study Notes
 
 A quick refresher generated from a chat — with the math and the diagram intact.
@@ -159,9 +210,12 @@ export const DEV_SAMPLE_FILES: Record<string, Array<[string, string]>> = {
     ['Keyboard Shortcuts.md', SHORTCUTS]
   ],
   'AI Answers': [['Messy Paste.md', MESSY_PASTE]],
-  'Agent Docs': [['Offline Sync Plan.md', AGENT_PLAN]],
+  'Agent Docs': [['Offline Sync Plan.md', AGENT_PLAN], ...(LARGE ? ([['Long Agent Log.md', agentLog()]] as Array<[string, string]>) : [])],
   Projects: [['Q3 Roadmap.md', ROADMAP]],
   Math: [['Polynomials.md', MATH]],
-  Diagrams: [['Flowchart.md', DIAGRAM]],
+  Diagrams: [
+    ['Flowchart.md', DIAGRAM],
+    ['Images and Diagrams.md', IMAGES]
+  ],
   Agent: [['AGENTS.md', AGENTS]]
 }

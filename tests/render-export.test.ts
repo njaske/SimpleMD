@@ -59,6 +59,24 @@ describe('buildStandaloneHtml', () => {
     assert.match(html, /background:#1c1b19/)
   })
 
+  it('exports a diagram that was not drawn yet as its source', () => {
+    // Arrange: one drawn diagram, one still waiting (a large document)
+    const el = article()
+    el.insertAdjacentHTML(
+      'beforeend',
+      '<div class="smd-mermaid"><svg viewBox="0 0 10 10"></svg><div class="smd-mermaid-held">x</div></div>' +
+        '<div class="smd-mermaid is-pending"><pre class="smd-mermaid-src" hidden><code>flowchart LR\nA --&gt; B</code></pre></div>'
+    )
+    // Act
+    const main = parseHtml(buildStandaloneHtml(el, { title: 'R', theme: 'light' })).ownerDocument.querySelector('main')
+    // Assert
+    assert.equal(main?.querySelectorAll('.smd-mermaid svg').length, 1)
+    assert.equal(main?.querySelector('.smd-mermaid-held'), null)
+    const source = Array.from(main?.querySelectorAll('pre') ?? []).find((pre) => pre.textContent?.includes('flowchart'))
+    assert.ok(source && !source.hasAttribute('hidden'))
+    assert.equal(main?.querySelector('.is-pending'), null)
+  })
+
   it('removes app chrome and keeps the content', () => {
     const doc = parseHtml(buildStandaloneHtml(article(), { title: 'R', theme: 'light' }))
     const main = doc.ownerDocument.querySelector('main.smd-article')

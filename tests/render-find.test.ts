@@ -131,4 +131,35 @@ describe('images', () => {
     assert.equal(tpl.content.querySelector('figure img')?.getAttribute('src'), 'https://x.example/a.png')
     assert.equal(tpl.content.querySelector('figcaption')?.textContent, 'Chart')
   })
+
+  it('turns a local image that cannot be read into a "not found" card', async () => {
+    // Arrange
+    const tpl = document.createElement('template')
+    tpl.innerHTML = '<p><img src="./shots/pic.png" alt="Screenshot"></p><p>Inline <img src="icon.png" alt="icon"> here</p>'
+    let reads = 0
+    const missing = { ...ctx(false), docPath: '/notes/a.md', readImage: async () => (reads++ ? Promise.reject(new Error('denied')) : null) }
+    // Act
+    enhanceImages(tpl.content, missing)
+    const el = article('')
+    document.body.appendChild(el)
+    el.appendChild(tpl.content)
+    const pending = el.querySelectorAll('.smd-imgph.is-missing').length
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // Assert
+    assert.equal(pending, 0, 'still loading at first')
+    const card = el.querySelector('figure .smd-imgph.is-missing')
+    assert.equal(card?.querySelector('strong')?.textContent, 'Image not found')
+    assert.equal(card?.querySelector('.smd-imgph-name')?.textContent, 'pic.png')
+    assert.ok(el.querySelector('.smd-imgchip.is-missing'), 'the inline chip too (read rejected)')
+    assert.equal(el.querySelector('figcaption')?.textContent, 'Screenshot')
+  })
+
+  it('explains at once why an untitled document shows no local images', () => {
+    const tpl = document.createElement('template')
+    tpl.innerHTML = '<p><img src="pic.png" alt=""></p>'
+    enhanceImages(tpl.content, ctx(false))
+    const card = tpl.content.querySelector('.smd-imgph.is-missing')
+    assert.equal(card?.querySelector('strong')?.textContent, 'Image not shown')
+    assert.match(card?.getAttribute('title') ?? '', /Save the document/)
+  })
 })

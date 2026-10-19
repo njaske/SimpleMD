@@ -29,10 +29,11 @@
   min-width: 0;
   border-radius: var(--radius-s, 6px);
   background: var(--bg-sunken, var(--bg-elev2, #f3f1ec));
-  box-shadow: inset 0 0 0 1px transparent;
+  box-shadow: 0 0 0 0 transparent;
   transition: box-shadow var(--dur-fast, 120ms) var(--ease-out, ease);
 }
-.smd-findbar-field:focus-within { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #c0392b) 55%, transparent); }
+/* The app's focus ring, on the field around the input (the input itself shows none). */
+.smd-findbar-field:focus-within { box-shadow: 0 0 0 2px var(--focus, #a8321f); }
 .smd-findbar-glass { flex: none; color: var(--fg-faint, #6e6962); }
 
 .smd-findbar-input {

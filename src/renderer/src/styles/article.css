@@ -2,22 +2,26 @@
    settings at runtime (--read-font, --read-size, --read-leading, --read-width); every
    other value is a token from tokens.css, with a fallback so it reads well on its own. */
 
-.smd-reader { container-type: inline-size; }
-
 .smd-article {
-  --gutter: 48px;
+  /* Narrow readers (under 680px) get tighter margins. A step function of the reader's
+     width (percentages here resolve against it) rather than a container query: a size
+     container makes Chrome restyle the whole article whenever a node is added to it,
+     which turns each chunk of a large document into a long task. */
+  --narrow: clamp(0px, calc((680px - 100%) * 1000), 1px);
+  --gutter: calc(48px - var(--narrow) * 24);
   --sunken: var(--bg-sunken, var(--code-bg, #f3f1ec));
   --hairline: var(--border, #ece9e3);
   --link: var(--accent-fg, var(--accent, #a8321f));
   --ui: var(--ui-font, 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif);
   --code-font: var(--mono, 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace);
-  /* Headings track tighter in Sans mode (Inter wants it at display sizes): the app
-     sets --read-heading-tracking, or data-read-font="sans" on .smd-root. */
+  /* Headings track tighter in Sans mode (Inter wants it at display sizes): the reader
+     puts data-read-font on .smd-reader (ReaderView.readingFont); the app may also set
+     data-read-font on .smd-root or --read-heading-tracking. */
   --heading-tracking: var(--read-heading-tracking, -0.01em);
   --find-current: var(--mark-current, #f2a900);
   max-width: calc(var(--read-width, 720px) + var(--gutter) * 2);
   margin: 0 auto;
-  padding: 56px var(--gutter) 168px;
+  padding: calc(56px - var(--narrow) * 20) var(--gutter) calc(168px - var(--narrow) * 48);
   color: var(--fg, #1f1e1c);
   font-family: var(--read-font, 'Literata Variable', Literata, Georgia, serif);
   font-size: var(--read-size, 17px);
@@ -29,10 +33,18 @@
   -webkit-font-smoothing: antialiased;
   overflow-wrap: break-word;
   hanging-punctuation: first;
+  /* The article is its own containing block and paint box: the sanitizer lets KaTeX's
+     absolute positioning through, so a document's position:absolute boxes scroll
+     with the text and can't paint over the reader around it. */
+  position: relative;
+  isolation: isolate;
+  contain: paint;
 }
-.smd-root[data-read-font='sans'] .smd-article { --heading-tracking: var(--read-heading-tracking, -0.02em); }
-@container (max-width: 680px) {
-  .smd-article { --gutter: 24px; padding-top: 36px; padding-bottom: 120px; }
+:is(.smd-reader, .smd-root)[data-read-font='sans'] .smd-article { --heading-tracking: var(--read-heading-tracking, -0.02em); }
+/* Same, keyed on the font itself while the App doesn't pass readingFont: the value is
+   READING_FONTS.Sans from app/appearance.ts (a style query matches it exactly). */
+@container style(--read-font: 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif) {
+  .smd-article { --heading-tracking: var(--read-heading-tracking, -0.02em); }
 }
 
 .smd-article > :first-child { margin-top: 0; }
@@ -290,6 +302,8 @@
 .smd-article :is(th, td)[align='center'] { text-align: center; }
 .smd-article :is(th, td)[align='right'] { text-align: right; font-variant-numeric: tabular-nums; }
 .smd-article td code { font-size: 0.92em; }
+/* Short row labels and single hyphenated words stay on one line (tables.ts). */
+.smd-article :is(th, td).smd-nowrap { white-space: nowrap; }
 
 /* ---- Images ------------------------------------------------------------------- */
 
@@ -313,7 +327,7 @@
   background: repeating-linear-gradient(-45deg, var(--sunken) 0 10px, transparent 10px 20px);
   border: 1px solid var(--hairline);
 }
-.smd-article .smd-imgph span {
+.smd-article .smd-imgph:not(.is-missing) > span {
   font: 500 12px/1.4 var(--ui);
   color: var(--fg-faint, #6e6962);
   background: var(--bg, #fefdfb);
@@ -321,6 +335,21 @@
   border-radius: 99px;
   border: 1px solid var(--hairline);
 }
+/* A local image that couldn't be read: a quiet one-line card instead of the striped
+   "loading" placeholder. */
+.smd-article .smd-imgph.is-missing {
+  height: auto;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  text-align: left;
+  background: var(--sunken);
+  font-family: var(--ui);
+  cursor: help;
+}
+.smd-article .smd-imgph-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }
+.smd-article .smd-imgph-text strong { font-size: 13px; font-weight: 600; color: var(--fg-muted, #5c5852); }
+.smd-article .smd-imgph-name { font-size: 12px; color: var(--fg-faint, #6e6962); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .smd-article .smd-imgblocked {
   display: flex;
   align-items: center;
@@ -363,6 +392,7 @@
   background: none;
 }
 .smd-article .smd-imgchip.smd-imgblocked { cursor: pointer; }
+.smd-article .smd-imgchip.is-missing { cursor: help; text-decoration: line-through; text-decoration-color: color-mix(in srgb, currentColor 60%, transparent); }
 .smd-article .smd-imgchip.smd-imgblocked:hover { color: var(--fg, #1f1e1c); border-color: var(--fg-faint, #6e6962); }
 
 /* ---- Math and diagrams --------------------------------------------------------- */
@@ -373,7 +403,7 @@
 .smd-article .smd-math > .katex-display { margin: 0; overflow: visible; }
 
 .smd-article .smd-mermaid { display: flex; margin: 1.9em 0; overflow-x: auto; overscroll-behavior-x: contain; }
-/* Natural size when it fits; a wide diagram shrinks to the column, but only to 60% of
+/* Natural size when it fits; a wide diagram shrinks to the column, but only to 80% of
    its size (mermaid.ts sets the widths) so labels stay readable, then scrolls.
    Auto margins center it without hiding an overflowing left edge. */
 .smd-article .smd-mermaid > svg {
@@ -382,16 +412,35 @@
   width: min(var(--smd-diagram-width, 100%), max(100%, var(--smd-diagram-min, 0px)));
   height: auto;
 }
-.smd-article .smd-mermaid:empty {
+/* Waiting to be drawn (diagrams.ts): a quiet breathing block; the source it keeps
+   inside only shows when printed before the diagram was drawn. */
+.smd-article .smd-mermaid.is-pending {
   min-height: 140px;
   border-radius: var(--radius-m, 10px);
   background: var(--sunken);
   animation: smdBreathe 1.6s var(--ease-out, ease) infinite alternate;
 }
 @keyframes smdBreathe { from { opacity: 0.45; } to { opacity: 1; } }
+.smd-article .smd-mermaid-src { display: none; }
 .smd-article .smd-mermaid-error { flex-direction: column; align-items: stretch; gap: 8px; }
 .smd-article .smd-mermaid-note { font: 500 12px/1.4 var(--ui); color: var(--warning, #8f5e00); }
 .smd-article .smd-mermaid-error pre { margin: 0; }
+/* A diagram that held remote images back, with its "Load images" note underneath. */
+.smd-article .smd-mermaid.has-held { flex-direction: column; gap: 10px; }
+.smd-article .smd-mermaid-held {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  gap: 10px;
+  max-width: 100%;
+  padding: 6px 6px 6px 10px;
+  font: 500 12px/1.35 var(--ui);
+  color: var(--fg-muted, #5c5852);
+  border: 1px dashed var(--border-strong, #dcd8d0);
+  border-radius: var(--radius-m, 10px);
+  background: var(--sunken);
+}
+.smd-article .smd-mermaid-held .smd-imgblocked-icon { color: var(--fg-faint, #6e6962); }
 
 /* ---- Callouts -------------------------------------------------------------------- */
 
@@ -560,9 +609,9 @@
 /* ---- Print -------------------------------------------------------------------- */
 
 @media print {
-  .smd-reader { container-type: normal; }
   .smd-article { max-width: none !important; padding: 0 !important; color: #000 !important; font-size: 11pt; }
-  .smd-article .smd-code-tools, .smd-article .smd-imgblocked-load { display: none !important; }
+  .smd-article .smd-code-tools, .smd-article .smd-imgblocked-load, .smd-article .smd-mermaid-held { display: none !important; }
+  .smd-article { contain: none; }
   .smd-article :is(pre, table, figure, .smd-callout, .smd-math, .smd-mermaid, .smd-frontmatter) { break-inside: avoid; }
   .smd-article :is(h1, h2, h3, h4) { break-after: avoid; }
   .smd-article pre { white-space: pre-wrap; }
@@ -571,4 +620,6 @@
   .smd-article :is(.smd-callout, th, pre, code, .smd-fm-chip, input.smd-task) { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .smd-article .smd-changed { background: none; box-shadow: none; }
   .smd-article .smd-fade { animation: none; }
+  .smd-article .smd-mermaid.is-pending { min-height: 0; background: none; animation: none; }
+  .smd-article .smd-mermaid.is-pending > .smd-mermaid-src { display: block; flex: 1; margin: 0; }
 }

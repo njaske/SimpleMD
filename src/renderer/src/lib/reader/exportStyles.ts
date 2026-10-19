@@ -87,7 +87,7 @@ export function standaloneCss(theme: ResolvedTheme, m: ReadingMetrics): string {
     `pre code{background:none;padding:0;font-size:13.5px;line-height:1.6}` +
     `table{border-collapse:separate;border-spacing:0;border:1px solid ${p.border};border-radius:10px;display:block;` +
     `overflow-x:auto;font-size:.92em}th,td{padding:.55em .9em;border-bottom:1px solid ${p.border};text-align:left}` +
-    `th{background:${p.sunken};font-weight:600}tr:last-child td{border-bottom:0}` +
+    `th{background:${p.sunken};font-weight:600}tr:last-child td{border-bottom:0}.smd-nowrap{white-space:nowrap}` +
     `figure{text-align:center}figcaption{font-size:.85em;color:${p.faint};margin-top:.5em}` +
     `.smd-math{overflow-x:auto;overflow-y:hidden;margin:1.2em 0;padding:.2em 0}math[display=block]{margin:0}` +
     `sup{line-height:0}[data-footnote-ref]{text-decoration:none;font:600 .72em/1 ${SANS};padding:0 .1em}[data-footnote-backref]{text-decoration:none}.smd-mermaid{display:flex;justify-content:center;margin:1.4em 0}` +
