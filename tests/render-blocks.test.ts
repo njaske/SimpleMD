@@ -6,6 +6,7 @@ setupRenderEnv()
 const { renderMarkdown } = await import('../src/renderer/src/lib/markdown.ts')
 const { extractFrontMatter } = await import('../src/renderer/src/lib/markdown/frontMatter.ts')
 const { calloutKind } = await import('../src/renderer/src/lib/markdown/callouts.ts')
+const { tidyTables, NOWRAP_CLASS } = await import('../src/renderer/src/lib/reader/tables.ts')
 
 function body(md: string): HTMLElement {
   return parseHtml(renderMarkdown(md).html)
@@ -128,5 +129,27 @@ describe('front matter', () => {
     const doc = body('---\ntitle: <img src=x onerror=alert(1)>\n---\n')
     assert.equal(doc.querySelectorAll('img').length, 0)
     assert.equal(doc.querySelector('.smd-fm-value')?.textContent, '<img src=x onerror=alert(1)>')
+  })
+})
+
+describe('tables', () => {
+  it('keeps short row labels and hyphenated words on one line, but lets prose wrap', () => {
+    // Arrange
+    const md = [
+      '| Strategy | How it works | Notes |',
+      '|---|---|---|',
+      '| Write-through | Writes go to the cache and the store at the same time, so reads stay fresh. | read-your-writes |',
+      '| A rather long first column label that should wrap | x | two words |'
+    ].join('\n')
+    const doc = body(md)
+    // Act
+    tidyTables(doc)
+    // Assert
+    const rows = Array.from(doc.querySelectorAll('tr'), (tr) => Array.from(tr.children, (c) => c.classList.contains(NOWRAP_CLASS)))
+    assert.deepEqual(rows, [
+      [true, false, false],
+      [true, false, true],
+      [false, false, false]
+    ])
   })
 })

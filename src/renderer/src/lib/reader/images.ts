@@ -72,9 +72,7 @@ function blockedCard(src: string): HTMLElement {
   card.className = 'smd-imgblocked'
   card.dataset.src = src
   blockedSrc.set(card, src)
-  const icon = document.createElement('span')
-  icon.className = 'smd-imgblocked-icon'
-  icon.innerHTML = IMAGE_OFF_ICON
+  const icon = imageOffIcon()
   const text = document.createElement('span')
   text.className = 'smd-imgblocked-text'
   const title = document.createElement('strong')
@@ -83,13 +81,26 @@ function blockedCard(src: string): HTMLElement {
   host.className = 'smd-imgblocked-host'
   host.textContent = hostOf(src)
   text.append(title, host)
+  card.append(icon, text, loadImagesButton())
+  return card
+}
+
+/** A "Load images" button the reader acts on (loads this document's remote images). */
+export function loadImagesButton(): HTMLButtonElement {
   const button = document.createElement('button')
   button.type = 'button'
   button.className = LOAD_IMAGES_CLASS
   button.textContent = 'Load images'
   loadControls.add(button)
-  card.append(icon, text, button)
-  return card
+  return button
+}
+
+/** The crossed-out picture used on blocked image cards and notes. */
+export function imageOffIcon(): HTMLElement {
+  const icon = document.createElement('span')
+  icon.className = 'smd-imgblocked-icon'
+  icon.innerHTML = IMAGE_OFF_ICON
+  return icon
 }
 
 function localPlaceholder(label: string): HTMLElement {
@@ -107,18 +118,50 @@ interface ImageInfo {
   title: string
 }
 
+const MISSING_TITLE = "SimpleMD shows images from this document's folder or the open folder."
+const UNSAVED_TITLE = 'Save the document to show images stored next to it.'
+
+function fileName(src: string): string {
+  return src.split(/[\\/]/).pop() || src
+}
+
+/** The striped placeholder means "loading"; once the read failed it turns into a
+ *  compact "not found" card (or a crossed-out chip inline), so it doesn't look stuck. */
+function markMissing(holder: HTMLElement, img: ImageInfo, unsaved: boolean): void {
+  const placeholder = holder.classList.contains('smd-imgph') ? holder : holder.querySelector<HTMLElement>('.smd-imgph')
+  if (!placeholder) return
+  placeholder.classList.add('is-missing')
+  placeholder.title = unsaved ? UNSAVED_TITLE : MISSING_TITLE
+  if (placeholder.classList.contains('smd-imgchip')) return
+  const text = document.createElement('span')
+  text.className = 'smd-imgph-text'
+  const title = document.createElement('strong')
+  title.textContent = unsaved ? 'Image not shown' : 'Image not found'
+  const name = document.createElement('span')
+  name.className = 'smd-imgph-name'
+  name.textContent = fileName(img.src)
+  text.append(title, name)
+  placeholder.replaceChildren(imageOffIcon(), text)
+}
+
 function loadLocal(holder: HTMLElement, img: ImageInfo, ctx: ImageContext): void {
-  if (!ctx.docPath) return
+  const docPath = ctx.docPath
+  if (!docPath) {
+    markMissing(holder, img, true)
+    return
+  }
+  const missing = (): void => {
+    if (!ctx.isStale() && holder.isConnected) markMissing(holder, img, false)
+  }
   ctx
-    .readImage(ctx.docPath, img.src)
+    .readImage(docPath, img.src)
     .then((dataUrl) => {
-      if (ctx.isStale() || !holder.isConnected || !dataUrl) return
+      if (ctx.isStale() || !holder.isConnected) return
+      if (!dataUrl) return missing()
       const placeholder = holder.classList.contains('smd-imgph') ? holder : holder.querySelector('.smd-imgph')
       placeholder?.replaceWith(makeImg(dataUrl, img.alt, img.title))
     })
-    .catch(() => {
-      // unreadable or not allowed: the placeholder with the file name stays
-    })
+    .catch(missing)
 }
 
 /** An image that shares its line with text or other images (badges, icons) stays

@@ -1,5 +1,4 @@
 import { computeOutline, slugify } from '@/lib/document'
-import { headingLines } from '@/lib/markdown'
 import { blockLines } from './anchors'
 
 // Heading ids (the outline's slugs, so outline clicks and #links land) and the
@@ -9,24 +8,40 @@ const HEADINGS = 'h1, h2, h3, h4, h5, h6'
 
 export interface HeadingSlugs {
   /** Outline slug by the 0-based source line of its heading. */
-  byLine: Map<number, string>
+  byLine: ReadonlyMap<number, string>
   /** Ids already taken (every outline slug is reserved up front). */
   used: Set<string>
   /** Next suffix to try per base slug, so a run of identical headings stays linear. */
   next: Map<string, number>
 }
 
-/** Outline slugs of `md`, computed once per render. */
+// The outline of a multi-MB file takes a while to scan; repaints of the same text reuse it.
+let last: { md: string; byLine: ReadonlyMap<number, string>; slugs: readonly string[] } | null = null
+
+/** Outline slugs of `md`, computed once per render. `used` and `next` are fresh
+ *  each call (assigning ids fills them in). */
 export function headingSlugs(md: string): HeadingSlugs {
-  // Line numbers follow the renderer, which reads CRLF and lone CR as line breaks
-  // (Windows files); a trailing CR would also make every ATX heading fail to match.
-  const text = md.includes('\r') ? md.replace(/\r\n?/g, '\n') : md
-  const outline = computeOutline(text)
-  const byLine = new Map<number, string>()
-  headingLines(text).forEach((line, i) => {
-    if (outline[i]) byLine.set(line, outline[i].slug)
-  })
-  return { byLine, used: new Set(outline.map((entry) => entry.slug)), next: new Map() }
+  if (last?.md !== md) {
+    // Line numbers follow the renderer, which reads CRLF and lone CR as line breaks
+    // (Windows files); a trailing CR would also make every ATX heading fail to match.
+    const text = md.includes('\r') ? md.replace(/\r\n?/g, '\n') : md
+    const outline = computeOutline(text)
+    last = { md, byLine: new Map(outline.map((entry) => [entry.line, entry.slug])), slugs: outline.map((e) => e.slug) }
+  }
+  return { byLine: last.byLine, used: new Set(last.slugs), next: new Map() }
+}
+
+/** Reserve ids already in the article (kept from the previous paint) so new headings
+ *  don't reuse them. False when one of them is an outline slug of the new text that
+ *  belongs to another heading: the kept part can't stay as it is then. */
+export function reserveIds(slugs: HeadingSlugs, root: ParentNode): boolean {
+  const outlineSlugs = new Set(slugs.byLine.values())
+  for (const h of Array.from(root.querySelectorAll<HTMLElement>(HEADINGS))) {
+    if (!h.id || h.closest('.smd-footnotes')) continue
+    if (h.dataset.outline === undefined && outlineSlugs.has(h.id)) return false
+    slugs.used.add(h.id)
+  }
+  return true
 }
 
 /** A unique id for `base`. `used` only ever grows, so resuming from the last suffix

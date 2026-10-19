@@ -42,8 +42,22 @@ function nextContentLine(lines: readonly string[], from: number): string | undef
 
 /** Split `md` into chunks that parse independently. */
 export function splitForProgressive(md: string): SourceChunk[] {
+  return splitScanned(scanDocument(md))
+}
+
+/** The document's lines and which of them sit inside code fences: computed once per
+ *  plan and shared by every pass over a multi-MB file. */
+interface Scan {
+  lines: string[]
+  fenced: boolean[]
+}
+
+function scanDocument(md: string): Scan {
   const lines = md.replace(/\r\n?/g, '\n').split('\n')
-  const fenced = scanFences(lines).inside
+  return { lines, fenced: scanFences(lines).inside }
+}
+
+function splitScanned({ lines, fenced }: Scan): SourceChunk[] {
   const inMath = mathMask(lines, fenced)
   const chunks: SourceChunk[] = []
   let start = 0
@@ -68,8 +82,10 @@ const REF_DEF = /^ {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*\S/
 /** Reference link definitions of the whole document, appended to every chunk so
  *  `[text][ref]` links resolve wherever the definition lives. */
 export function collectRefDefs(md: string): string {
-  const lines = md.replace(/\r\n?/g, '\n').split('\n')
-  const fenced = scanFences(lines).inside
+  return refDefsScanned(scanDocument(md))
+}
+
+function refDefsScanned({ lines, fenced }: Scan): string {
   return lines.filter((line, i) => !fenced[i] && REF_DEF.test(line)).join('\n')
 }
 
@@ -144,8 +160,10 @@ function tally(counts: Readonly<Record<string, number>>, refs: readonly string[]
 
 /** Footnote numbering for `chunks` of `md`, or null when it has no footnotes. */
 export function planFootnotes(md: string, chunks: readonly SourceChunk[]): FootnotePlan | null {
-  const lines = md.replace(/\r\n?/g, '\n').split('\n')
-  const fenced = scanFences(lines).inside
+  return footnotesScanned(scanDocument(md), chunks)
+}
+
+function footnotesScanned({ lines, fenced }: Scan, chunks: readonly SourceChunk[]): FootnotePlan | null {
   const defs = collectDefinitions(lines, fenced)
   if (!defs.labels.size) return null
   const perChunk = chunks.map((chunk, c) =>
@@ -159,4 +177,19 @@ export function planFootnotes(md: string, chunks: readonly SourceChunk[]): Footn
     return plan
   })
   return { defs: defs.text, chunks: plans }
+}
+
+export interface DocumentPlan {
+  chunks: SourceChunk[]
+  /** Reference link definitions of the whole document. */
+  refDefs: string
+  footnotes: FootnotePlan | null
+}
+
+/** Chunks, shared reference definitions and footnote numbering of `md` from one scan
+ *  of its lines (each pass on its own would split and fence-scan the file again). */
+export function planDocument(md: string): DocumentPlan {
+  const scan = scanDocument(md)
+  const chunks = splitScanned(scan)
+  return { chunks, refDefs: refDefsScanned(scan), footnotes: footnotesScanned(scan, chunks) }
 }

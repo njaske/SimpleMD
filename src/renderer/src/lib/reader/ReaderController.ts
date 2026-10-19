@@ -1,28 +1,19 @@
-import type { ResolvedTheme, ViewMode } from '@shared/types'
-import {
-  FIX_DIAGRAM,
-  isLargeDocument,
-  planProgressive,
-  prepareMarkdown,
-  renderMarkdown,
-  type RenderChunk
-} from '@/lib/markdown'
+import type { ReadingFont, ResolvedTheme, ViewMode } from '@shared/types'
+import { prepareMarkdown } from '@/lib/markdown'
 import type { LineRange } from '@/lib/ranges'
 import { lineAtOffset, measureAnchors, offsetOfLine, type Anchor } from './anchors'
 import { markChanges, nextChange, unmarkChanges } from './changes'
-import { decorateCodeBlocks } from './codeBlocks'
 import { FindState, type FindResult } from './find'
-import { activeHeading, assignHeadingIds, headingSlugs, type HeadingSlugs } from './headings'
-import { enhanceImages, isLoadImagesControl, loadBlocked } from './images'
-import { renderMermaid, type MermaidJob } from './mermaid'
-import { labelTaskBoxes } from './tasks'
+import { activeHeading } from './headings'
+import { isLoadImagesControl, loadBlocked } from './images'
+import { ArticlePainter, type PaintProgress } from './painter'
 
 export type { LineRange, FindResult }
 
-// Owns the rendered-document pane ("reader"): turning Markdown into the article
-// DOM, the async work that follows (images, diagrams, the rest of a large file),
-// clicks inside it, and the scroll/find/highlight helpers the rest of the app
-// drives. The App only tells it what to show; it never touches the article DOM.
+// Owns the rendered-document pane ("reader"): when to paint (painter.ts builds the
+// article DOM and the async work that follows), clicks inside it, and the
+// scroll/find/highlight helpers the rest of the app drives. The App only tells it
+// what to show; it never touches the article DOM.
 
 /** In split view the preview trails typing by this long (longer for huge docs). */
 const LIVE_PREVIEW_DELAY_MS = 150
@@ -33,8 +24,6 @@ const SCROLL_MARGIN = 24
 /** How long "follow the end" waits for the repaint it was asked before. */
 const STICK_TO_END_MS = 2000
 const FLASH_MS = 1200
-/** Most work one idle slice of a progressive render may do. */
-const SLICE_MS = 40
 /** Find-as-you-type waits this long after a keystroke in huge documents. */
 const FIND_DELAY_LARGE_MS = 120
 
@@ -52,6 +41,9 @@ export interface ReaderView {
   mode: ViewMode
   theme: ResolvedTheme
   blockRemoteImages: boolean
+  /** The reading font, so the article can fit details to it (tighter heading
+   *  tracking in Sans). Changing it never repaints. */
+  readingFont?: ReadingFont
 }
 
 export interface RenderInfo {
@@ -59,6 +51,14 @@ export interface RenderInfo {
   fixes: string[]
   /** Remote images held back by "Block remote images" (0 once loaded). */
   blockedImages?: number
+  /** The document this describes (null when the reader is empty). */
+  id?: string | null
+  /** True when this report follows a paint of the document's text: once its first
+   *  part is on screen, and again when the rest of a large document has landed.
+   *  False for later news about the same paint (images loaded, a diagram repaired). */
+  painted?: boolean
+  /** False while the rest of a large document is still being rendered. */
+  complete?: boolean
 }
 
 export interface ReaderCallbacks {
@@ -67,7 +67,9 @@ export interface ReaderCallbacks {
   onLink(href: string): void
   /** A task checkbox was clicked. `line` is the 0-based source line of the task item. */
   onToggleTask(line: number, checked: boolean): void
-  /** Called after each paint with notes about the document ("fixed for display" repairs). */
+  /** Called after each paint, once the document (or the first part of a large one) is
+   *  on screen, with notes about it ("fixed for display" repairs, blocked images).
+   *  Change highlights and scrollToEnd() called from here apply to the new text. */
   onRenderInfo?(info: RenderInfo): void
   /** Scroll spy: the heading slug currently at the top of the reader. */
   onActiveHeading?(slug: string | null): void
@@ -82,28 +84,7 @@ interface RenderKey {
   md: string
 }
 
-interface Progressive {
-  gen: number
-  article: HTMLElement
-  queue: RenderChunk[]
-  handle: number | null
-}
-
 type PendingScroll = { kind: 'end'; until: number } | { kind: 'line'; line: number } | null
-
-interface IdleDeadlineLike {
-  timeRemaining(): number
-}
-
-function onIdle(cb: (deadline: IdleDeadlineLike) => void): number {
-  if (typeof requestIdleCallback === 'function') return requestIdleCallback(cb, { timeout: 50 })
-  return window.setTimeout(() => cb({ timeRemaining: () => 16 }), 16)
-}
-
-function cancelIdle(handle: number): void {
-  if (typeof cancelIdleCallback === 'function') cancelIdleCallback(handle)
-  else clearTimeout(handle)
-}
 
 export class ReaderController {
   private el: HTMLElement | null = null
@@ -116,10 +97,6 @@ export class ReaderController {
   private doc: ReaderDoc = { id: null, path: null, md: '' }
   private view: ReaderView = { mode: 'read', theme: 'light', blockRemoteImages: false }
 
-  private progressive: Progressive | null = null
-  private slugs: HeadingSlugs = { byLine: new Map(), used: new Set(), next: new Map() }
-  private fixes: string[] = []
-  private blockedImages = 0
   private allowRemoteFor: string | null = null
   private anchorCache: { gen: number; height: number; width: number; anchors: Anchor[] } | null = null
   private scrollSubs = new Set<() => void>()
@@ -130,9 +107,19 @@ export class ReaderController {
   private changeRanges: LineRange[] | null = null
   private findState = new FindState()
   private findSubs = new Set<(result: FindResult) => void>()
-  private diagrams: Promise<void> = Promise.resolve()
+  private lastInfo = ''
+  private readonly painter: ArticlePainter
+  private readonly cb: ReaderCallbacks
 
-  constructor(private readonly cb: ReaderCallbacks) {}
+  constructor(cb: ReaderCallbacks) {
+    this.cb = cb
+    this.painter = new ArticlePainter({
+      readImage: (docPath, src) => this.cb.readImage(docPath, src),
+      scroller: () => this.el,
+      onChunks: (article, progress) => this.afterChunks(article, progress, false),
+      onDiagram: () => this.afterDiagram()
+    })
+  }
 
   /** Attach to (or detach from, with null) the scrollable reader element. The next
    *  update() paints it (an empty element always counts as needing a paint). */
@@ -159,6 +146,7 @@ export class ReaderController {
     this.view = view
     const el = this.el
     if (!el) return
+    if (view.readingFont) el.setAttribute('data-read-font', view.readingFont.toLowerCase())
     const { id, md } = doc
     const { mode, theme, blockRemoteImages } = view
     const last = this.renderKey
@@ -225,7 +213,8 @@ export class ReaderController {
 
   /** The rendered article, for export and copy. Null when nothing is shown. */
   getArticle(): HTMLElement | null {
-    return this.el?.querySelector<HTMLElement>('.smd-article') ?? null
+    const article = this.painter.article
+    return article && this.el?.contains(article) ? article : null
   }
 
   // ---- synced scrolling ------------------------------------------------------------
@@ -253,13 +242,18 @@ export class ReaderController {
 
   // ---- following a file that grows -------------------------------------------------
 
-  /** True when the reader is scrolled to (or within a screen of) the end. */
+  /** True when the reader is scrolled to (or within a screen of) the end. While the
+   *  rest of a large document is still rendering, its end isn't on screen yet: only a
+   *  reader that is already following the end counts as near it. */
   isNearEnd(): boolean {
     const el = this.el
     if (!el) return false
-    return el.scrollHeight - el.scrollTop - el.clientHeight <= el.clientHeight
+    if (this.painter.isRendering()) return this.pendingScroll?.kind === 'end'
+    return nearEnd(el)
   }
 
+  /** Scroll to the end and keep following it through the repaint in progress (or
+   *  about to start) and the rest of a large document as it lands. */
   scrollToEnd(): void {
     const el = this.el
     if (!el) return
@@ -346,15 +340,25 @@ export class ReaderController {
     this.allowRemoteFor = this.doc.id
     const article = this.getArticle()
     if (article) loadBlocked(article)
+    this.painter.imagesLoaded()
     this.findState.invalidate()
-    this.blockedImages = 0
-    this.reportInfo()
+    this.reportInfo(false)
+  }
+
+  /** Get the article ready to be exported, copied or printed: the rest of a large
+   *  document rendered and every diagram drawn. Resolves when it's done. */
+  async prepareForExport(): Promise<void> {
+    const article = this.getArticle()
+    if (!article) return
+    const from = this.painter.isRendering() ? 0 : Infinity
+    if (this.painter.finish()) this.afterChunks(article, { complete: true, from }, false)
+    await this.painter.diagrams.drawAll()
   }
 
   dispose(): void {
     if (this.renderTimer) clearTimeout(this.renderTimer)
     this.renderTimer = null
-    this.cancelProgressive()
+    this.painter.dispose()
     if (this.spyFrame !== null) cancelAnimationFrame(this.spyFrame)
     this.spyFrame = null
     this.clearFind()
@@ -365,35 +369,35 @@ export class ReaderController {
 
   private paint(el: HTMLElement, doc: ReaderDoc): void {
     const changedFile = this.lastFile !== doc.id
-    const keepLine = changedFile ? null : this.getTopLine()
-    const gen = ++this.renderGen
-    this.cancelProgressive()
+    // Following the end needs no position; otherwise keep the line being read.
+    const keepLine = changedFile || this.pendingScroll?.kind === 'end' ? null : this.getTopLine()
+    this.renderGen++
     this.anchorCache = null
     if (!doc.id) {
-      el.innerHTML = ''
+      this.painter.clear(el)
       this.lastFile = null
+      this.reportInfo(true)
       return
     }
     if (changedFile) this.resetForNewDocument()
-    this.slugs = headingSlugs(doc.md)
-    this.fixes = []
-    this.blockedImages = 0
-
-    const article = document.createElement('div')
-    article.className = 'smd-article' + (changedFile ? ' smd-fade' : '')
-    const chunks = isLargeDocument(doc.md) ? planProgressive(doc.md) : [{ src: doc.md, options: {} }]
-    this.renderChunk(article, chunks[0], gen)
-    el.replaceChildren(article)
-
+    const progress = this.painter.paint(el, {
+      id: doc.id,
+      path: doc.path,
+      md: doc.md,
+      theme: this.view.theme,
+      blockRemote: this.view.blockRemoteImages && this.allowRemoteFor !== doc.id,
+      fresh: changedFile
+    })
     if (changedFile) {
       el.scrollTop = 0
       this.lastFile = doc.id
-    } else if (keepLine !== null) {
-      // Keep the reading position across the repaint (unless following the end).
-      if (this.pendingScroll?.kind !== 'end') this.pendingScroll = { kind: 'line', line: keepLine }
+    } else if (keepLine !== null && keepLine >= progress.from) {
+      // The line being read was re-rendered: bring it back once it's there again.
+      // (Above `from` the article kept its DOM, so the position never moved.)
+      this.pendingScroll = { kind: 'line', line: keepLine }
     }
-    if (chunks.length > 1) this.startProgressive(article, chunks.slice(1), gen)
-    this.afterChunks(article, chunks.length === 1)
+    const article = this.painter.article
+    if (article) this.afterChunks(article, progress, true)
   }
 
   private resetForNewDocument(): void {
@@ -403,83 +407,43 @@ export class ReaderController {
     if (this.allowRemoteFor !== this.doc.id) this.allowRemoteFor = null
   }
 
-  /** Render one chunk of Markdown and append it to `article`. */
-  private renderChunk(article: HTMLElement, chunk: RenderChunk, gen: number): void {
-    const { html, fixes } = renderMarkdown(chunk.src, chunk.options)
-    const doc = this.doc
-    // Build inside an inert <template> so <img> tags in the document are never
-    // fetched (enhanceImages swaps them out); it's attached once ready.
-    const tpl = document.createElement('template')
-    tpl.innerHTML = html
-    const frag = tpl.content
-    assignHeadingIds(frag, this.slugs)
-    this.blockedImages += enhanceImages(frag, {
-      docPath: doc.path,
-      blockRemote: this.view.blockRemoteImages && this.allowRemoteFor !== doc.id,
-      readImage: (docPath, src) => this.cb.readImage(docPath, src),
-      isStale: () => this.renderGen !== gen
-    })
-    // Pull mermaid blocks out before decorating so they get no copy button.
-    const jobs = extractDiagrams(frag)
-    decorateCodeBlocks(frag)
-    labelTaskBoxes(frag)
-    article.appendChild(frag)
-    for (const fix of fixes) if (!this.fixes.includes(fix)) this.fixes.push(fix)
-    // One diagram batch at a time: mermaid's renderer is global and not re-entrant.
-    if (jobs.length) this.diagrams = this.diagrams.then(() => this.drawDiagrams(jobs, gen)).catch(() => undefined)
-  }
-
   /** Bring marks, find, scroll position and status up to date after chunks land. */
-  private afterChunks(article: HTMLElement, complete: boolean): void {
+  private afterChunks(article: HTMLElement, { complete }: PaintProgress, first: boolean): void {
     this.anchorCache = null
     if (this.changeRanges) markChanges(article, this.changeRanges)
-    if (this.findState.query) {
+    // Re-searching a multi-MB article on every idle slice would cost more than the
+    // slice itself; the results catch up once the document is complete.
+    if (this.findState.query && (first || complete)) {
       this.findState.refresh(article)
       const result = this.findState.result
       this.findSubs.forEach((cb) => cb(result))
     }
     this.applyPendingScroll(complete)
-    this.reportInfo()
     this.scheduleSpy()
+    // Last, so the App's handler (change highlights, follow the end) sees the new text.
+    this.reportInfo(first || complete)
   }
 
-  private startProgressive(article: HTMLElement, queue: RenderChunk[], gen: number): void {
-    const job: Progressive = { gen, article, queue, handle: null }
-    const step = (deadline: IdleDeadlineLike): void => {
-      if (this.progressive !== job) return
-      // At least one chunk per slice; more while there's idle time, but never long
-      // enough to make a click or keystroke wait.
-      const started = performance.now()
-      do {
-        const chunk = job.queue.shift()
-        if (chunk) this.renderChunk(article, chunk, gen)
-      } while (job.queue.length && deadline.timeRemaining() > 20 && performance.now() - started < SLICE_MS)
-      const done = !job.queue.length
-      if (done) this.progressive = null
-      else job.handle = onIdle(step)
-      this.afterChunks(article, done)
-    }
-    this.progressive = job
-    job.handle = onIdle(step)
-  }
-
-  private cancelProgressive(): void {
-    if (this.progressive?.handle != null) cancelIdle(this.progressive.handle)
-    this.progressive = null
-  }
-
-  private async drawDiagrams(jobs: MermaidJob[], gen: number): Promise<void> {
-    const fixed = await renderMermaid(jobs, this.view.theme, () => this.renderGen !== gen)
-    if (this.renderGen !== gen) return
+  private afterDiagram(): void {
     this.anchorCache = null
-    if (fixed && !this.fixes.includes(FIX_DIAGRAM)) {
-      this.fixes.push(FIX_DIAGRAM)
-      this.reportInfo()
-    }
+    this.applyPendingScroll(!this.painter.isRendering())
+    this.reportInfo(false)
   }
 
-  private reportInfo(): void {
-    this.cb.onRenderInfo?.({ fixes: [...this.fixes], blockedImages: this.blockedImages })
+  /** Tell the App about the document on screen. Reports that don't follow a paint
+   *  are only sent when something in them changed. */
+  private reportInfo(painted: boolean): void {
+    const info: RenderInfo = {
+      fixes: this.painter.fixes(),
+      blockedImages: this.painter.blockedImages(),
+      id: this.renderKey?.id ?? null,
+      painted,
+      complete: !this.painter.isRendering()
+    }
+    const key = JSON.stringify([info.id, info.fixes, info.blockedImages, info.complete])
+    if (!painted && key === this.lastInfo) return
+    this.lastInfo = key
+    this.cb.onRenderInfo?.(info)
   }
 
   // ---- scrolling -------------------------------------------------------------------
@@ -513,8 +477,14 @@ export class ReaderController {
     const pending = this.pendingScroll
     if (!el || !pending) return
     if (pending.kind === 'end') {
-      if (Date.now() > pending.until) this.pendingScroll = null
-      else this.setScrollTop(el.scrollHeight)
+      const now = Date.now()
+      if (complete && now > pending.until) {
+        this.pendingScroll = null
+        return
+      }
+      // Keep following while the rest of the document streams in, and a moment after.
+      if (!complete) this.pendingScroll = { kind: 'end', until: Math.max(pending.until, now + STICK_TO_END_MS) }
+      this.setScrollTop(el.scrollHeight)
       return
     }
     const anchors = this.anchors()
@@ -535,7 +505,7 @@ export class ReaderController {
     }
     this.programmaticTop = null
     // The user took over: stop pinning to the end or restoring a line.
-    if (this.pendingScroll && !this.isNearEnd()) this.pendingScroll = null
+    if (this.pendingScroll && !nearEnd(el)) this.pendingScroll = null
     this.scrollSubs.forEach((cb) => cb())
   }
 
@@ -639,20 +609,7 @@ function decodeURIComponentSafe(text: string): string {
   }
 }
 
-/** Swap ```mermaid code blocks for empty diagram containers (drawn asynchronously). */
-function extractDiagrams(root: ParentNode): MermaidJob[] {
-  const jobs: MermaidJob[] = []
-  root.querySelectorAll<HTMLElement>('pre > code.language-mermaid').forEach((code) => {
-    const pre = code.parentElement
-    if (!pre) return
-    const container = document.createElement('div')
-    container.className = 'smd-mermaid'
-    for (const name of ['data-line', 'data-line-end']) {
-      const value = pre.getAttribute(name)
-      if (value !== null) container.setAttribute(name, value)
-    }
-    pre.replaceWith(container)
-    jobs.push({ container, source: code.textContent || '' })
-  })
-  return jobs
+/** Within a screen of the end of what's rendered. */
+function nearEnd(el: HTMLElement): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= el.clientHeight
 }

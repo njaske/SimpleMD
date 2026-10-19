@@ -10,7 +10,7 @@ export interface StandaloneOptions {
 }
 
 // Nothing executable or fetching survives an export, whatever the article holds.
-const STRIP = 'script, iframe, object, embed, link, meta, base, form, button, .smd-code-tools, .smd-copy'
+const STRIP = 'script, iframe, object, embed, link, meta, base, form, button, .smd-code-tools, .smd-copy, .smd-mermaid-held'
 const APP_CLASSES = ['smd-changed', 'smd-changed-out', 'smd-flash', 'smd-fade']
 const APP_ATTRS = ['data-line', 'data-line-end', 'data-task-line', 'data-outline', 'tabindex', 'role']
 const CSP =
@@ -49,7 +49,21 @@ function settleImages(root: HTMLElement): void {
     if (figure && !card.classList.contains('smd-imgchip')) figure.replaceWith(replacement)
     else card.replaceWith(replacement)
   })
-  root.querySelectorAll<HTMLElement>('.smd-imgph').forEach((ph) => ph.replaceWith(textSpan(ph.textContent || '')))
+  root.querySelectorAll<HTMLElement>('.smd-imgph').forEach((ph) => {
+    const name = ph.querySelector('.smd-imgph-name')?.textContent ?? ph.textContent ?? ''
+    ph.replaceWith(textSpan(name))
+  })
+}
+
+/** A diagram that wasn't drawn yet exports as its source, like a code block. */
+function settleDiagrams(root: HTMLElement): void {
+  root.querySelectorAll<HTMLElement>('.smd-mermaid.is-pending').forEach((box) => {
+    const source = box.querySelector<HTMLElement>(':scope > .smd-mermaid-src')
+    if (!source) return box.remove()
+    source.removeAttribute('hidden')
+    source.removeAttribute('class')
+    box.replaceWith(source)
+  })
 }
 
 function textSpan(text: string): HTMLSpanElement {
@@ -82,6 +96,7 @@ function cleanAppMarkup(root: HTMLElement): void {
 function exportClone(article: HTMLElement): HTMLElement {
   const clone = article.cloneNode(true) as HTMLElement
   settleImages(clone)
+  settleDiagrams(clone)
   // After settleImages: whatever it made goes through the same filter.
   stripUnsafe(clone)
   mathToMathml(clone)
