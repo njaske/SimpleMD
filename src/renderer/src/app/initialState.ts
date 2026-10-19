@@ -54,6 +54,10 @@ export function initialState(env: Pick<AppState, 'systemDark' | 'narrow' | 'comp
     readingOpen: false,
     renaming: null,
     recovery: null,
-    recentCommands: []
+    recentCommands: [],
+    find: null,
+    renderFixes: [],
+    blockedImages: 0,
+    changes: {}
   }
 }

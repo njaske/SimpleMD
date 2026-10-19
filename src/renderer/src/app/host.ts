@@ -22,10 +22,22 @@ export interface AppHost {
   focusEditor(): void
 }
 
-/** A short, human reason from an unknown error, for the end of a toast. */
+/** A clean document's text replaced by the disk copy (folder rescan or Reload from disk). */
+export interface DiskReload {
+  id: string
+  before: string
+  after: string
+}
+
+/** Told about reloads before they are applied (so it can measure the reader first);
+ *  returns a callback to run once the new text is in state. */
+export type ReloadHook = (reloads: readonly DiskReload[]) => () => void
+
+/** A short, human reason from an unknown error, for the middle of a toast. Trailing
+ *  sentence punctuation goes: toasts wrap it as "Couldn't x (reason). Do y." */
 export function reason(err: unknown): string {
   const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
   // IPC errors arrive as "Error invoking remote method 'x': Error: actual message".
   const tail = msg.replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, '').trim()
-  return tail && tail.length < 140 ? tail : ''
+  return tail && tail.length < 140 ? tail.replace(/[.!?]+$/, '') : ''
 }

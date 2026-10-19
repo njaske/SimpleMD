@@ -1,8 +1,8 @@
 import type { Platform } from '@shared/types'
 import { formatShortcut } from '@/lib/logic/platform'
 
-// "What changed" bar floating at the top of the reader pane. Presentational: the
-// App owns the change ranges and decides when to show it.
+// "What changed" strip along the top of the reader pane, in the flow so it never sits
+// on the text. Presentational: the App owns the change ranges and decides when to show it.
 
 export interface ChangeBarProps {
   count: number
@@ -26,8 +26,11 @@ export default function ChangeBar({ count, platform, onNext, onDismiss }: Change
       }}
     >
       <span className="smd-changebar-dot" aria-hidden="true" />
-      <span className="smd-changebar-count">
-        {count} {count === 1 ? 'change' : 'changes'}
+      <span className="smd-changebar-text">
+        <span className="smd-changebar-count">
+          {count} {count === 1 ? 'change' : 'changes'}
+        </span>
+        <span className="smd-changebar-since"> since you last looked</span>
       </span>
       <button
         type="button"

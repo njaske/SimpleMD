@@ -77,6 +77,15 @@ export function clampTextSize(px: number): number {
   return Math.min(TEXT_SIZE.max, Math.max(TEXT_SIZE.min, Math.round(px)))
 }
 
+/** Monospaced source reads a little smaller than the prose it becomes. */
+const EDITOR_RATIO = 0.82
+export const EDITOR_SIZE = { min: 12, max: 20 }
+
+/** The editor's text size for a reader text size: it follows Bigger/Smaller text. */
+export function editorFontSize(readingSize: number): number {
+  return Math.min(EDITOR_SIZE.max, Math.max(EDITOR_SIZE.min, Math.round(readingSize * EDITOR_RATIO)))
+}
+
 export function clampScale(f: number): number {
   return Math.min(UI_SCALE.max, Math.max(UI_SCALE.min, Math.round(f * 100) / 100))
 }

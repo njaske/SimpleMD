@@ -1,33 +1,31 @@
 // Every floating layer of the shell in one place: palette, settings, the Aa
 // popover, dialogs, crash recovery, toasts and the drop overlay. Stateless: it
 // renders from App state and calls back into the controller modules.
-import { lazy, Suspense } from 'react'
+import { Suspense, type ReactNode } from 'react'
 import type { Platform } from '@shared/types'
 import type { CommandId } from '@/lib/commands'
 import type { QuickOpenItem } from '@/state/viewmodel'
 import type { PaletteCommand, PaletteFolder } from '@/components/CommandPalette'
 import type { SettingsValues } from '@/components/SettingsDialog'
-import ReadingPopover from '@/components/ReadingPopover'
-import RecoveryPrompt from '@/components/RecoveryPrompt'
 import Toast, { ToastAnnouncer } from '@/components/Toast'
 import DropOverlay from '@/components/DropOverlay'
-import { CloseWindowDialog, ConfirmDialog, NameDialog, UnsavedDialog } from '@/components/Prompts'
+import LazyBoundary from './LazyBoundary'
+import {
+  CloseWindowDialog,
+  CommandPalette,
+  ConfirmDialog,
+  NameDialog,
+  ReadingPopover,
+  RecoveryPrompt,
+  SettingsDialog,
+  UnsavedDialog
+} from './lazyParts'
 import type { AppHost } from './host'
 import type { DocumentActions } from './documents'
 import type { FileActions } from './files'
 import type { AppState, DialogState } from './types'
 import { clampScale, clampTextSize } from './appearance'
 import { baseName, isDirtyIn, unsavedIds } from './model'
-
-// The palette and Settings stay out of the startup chunk; App warms them when idle.
-const CommandPalette = lazy(() => import('@/components/CommandPalette'))
-const SettingsDialog = lazy(() => import('@/components/SettingsDialog'))
-
-/** Load the lazy overlays ahead of first use. */
-export function prefetchOverlays(): void {
-  void import('@/components/CommandPalette')
-  void import('@/components/SettingsDialog')
-}
 
 interface Props {
   state: AppState
@@ -71,6 +69,15 @@ function clean(patch: Partial<SettingsValues>): Partial<SettingsValues> {
     ...(patch.uiScale !== undefined ? { uiScale: clampScale(patch.uiScale) } : {}),
     ...(patch.readingSize !== undefined ? { readingSize: clampTextSize(patch.readingSize) } : {})
   }
+}
+
+/** One lazy overlay: its own boundary, so a loading part never hides another. */
+function Lazy({ children }: { children: ReactNode }) {
+  return (
+    <LazyBoundary>
+      <Suspense fallback={null}>{children}</Suspense>
+    </LazyBoundary>
+  )
 }
 
 function DialogLayer({ dialog, p }: { dialog: DialogState; p: Props }) {
@@ -145,24 +152,26 @@ export default function AppOverlays(p: Props) {
   return (
     <>
       {s.readingOpen && s.activeId && (
-        <ReadingPopover
-          anchor={p.readingAnchor}
-          theme={s.theme}
-          readingFont={s.readingFont}
-          readingSize={s.readingSize}
-          lineHeight={s.lineHeight}
-          readingWidth={s.readingWidth}
-          onTheme={(theme) => host.update({ theme })}
-          onFont={(readingFont) => host.update({ readingFont })}
-          onSize={(px) => host.update({ readingSize: clampTextSize(px) })}
-          onLineHeight={(lineHeight) => host.update({ lineHeight })}
-          onWidth={(readingWidth) => host.update({ readingWidth })}
-          onMore={() => host.update({ readingOpen: false, settings: 'reading' })}
-          onClose={() => host.update({ readingOpen: false })}
-        />
+        <Lazy>
+          <ReadingPopover
+            anchor={p.readingAnchor}
+            theme={s.theme}
+            readingFont={s.readingFont}
+            readingSize={s.readingSize}
+            lineHeight={s.lineHeight}
+            readingWidth={s.readingWidth}
+            onTheme={(theme) => host.update({ theme })}
+            onFont={(readingFont) => host.update({ readingFont })}
+            onSize={(px) => host.update({ readingSize: clampTextSize(px) })}
+            onLineHeight={(lineHeight) => host.update({ lineHeight })}
+            onWidth={(readingWidth) => host.update({ readingWidth })}
+            onMore={() => host.update({ readingOpen: false, settings: 'reading' })}
+            onClose={() => host.update({ readingOpen: false })}
+          />
+        </Lazy>
       )}
-      <Suspense fallback={null}>
-        {s.palette && (
+      {s.palette && (
+        <Lazy>
           <CommandPalette
             query={s.palette.query}
             onQuery={(query) => host.update((st) => (st.palette ? { palette: { ...st.palette, query } } : null))}
@@ -176,8 +185,10 @@ export default function AppOverlays(p: Props) {
             onRunCommand={p.runCommand}
             onClose={() => host.update({ palette: null })}
           />
-        )}
-        {s.settings && (
+        </Lazy>
+      )}
+      {s.settings && (
+        <Lazy>
           <SettingsDialog
             section={s.settings}
             values={settingsValues(s)}
@@ -188,11 +199,17 @@ export default function AppOverlays(p: Props) {
             onOpenLink={(url) => void window.api.openExternal(url).catch(() => host.toast("Couldn't open that link."))}
             onClose={() => host.update({ settings: null })}
           />
-        )}
-      </Suspense>
-      {s.dialog && <DialogLayer dialog={s.dialog} p={p} />}
+        </Lazy>
+      )}
+      {s.dialog && (
+        <Lazy>
+          <DialogLayer dialog={s.dialog} p={p} />
+        </Lazy>
+      )}
       {s.recovery && !s.dialog && (
-        <RecoveryPrompt entries={s.recovery} onRestore={p.onRestore} onDiscard={p.onDiscard} />
+        <Lazy>
+          <RecoveryPrompt entries={s.recovery} onRestore={p.onRestore} onDiscard={p.onDiscard} />
+        </Lazy>
       )}
       <ToastAnnouncer toast={s.toast} />
       {s.toast && (

@@ -1,25 +1,30 @@
-import { Component, createRef, lazy, Suspense } from 'react'
-import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
+import { Component, createRef, Suspense } from 'react'
 import { computeOutline, computeStats, searchAll } from '@/lib/document'
 import type { SearchResult } from '@/lib/document'
 import { ReaderController } from '@/lib/reader/ReaderController'
-import type { EditorHandle } from '@/lib/editor/types'
+import type { EditorHandle, FormatCommand } from '@/lib/editor/types'
 import { COMMANDS, commandLabel, rememberCommand, type CommandId, type PlatformWords } from '@/lib/commands'
 import { isAgentInstructionFile, titleFromMarkdown } from '@/lib/logic/files'
 import { formatShortcut, revealLabel, trashName } from '@/lib/logic/platform'
 import type { NamedFileRef, OutlineItem } from '@/state/viewmodel'
-import { InfoIcon } from '@/lib/icons'
 import Sidebar from '@/components/Sidebar'
 import TopBar from '@/components/TopBar'
 import Outline from '@/components/Outline'
 import StatusBar from '@/components/StatusBar'
+// First paint when no tabs are open, so it is part of the startup chunk.
 import Welcome from '@/components/Welcome'
-import ContextMenu, { type MenuEntry } from '@/components/ContextMenu'
-import AppOverlays, { prefetchOverlays } from '@/app/AppOverlays'
+import AppOverlays from '@/app/AppOverlays'
+import DocumentView from '@/app/DocumentView'
+import LazyBoundary from '@/app/LazyBoundary'
+import { ContextMenu, prefetchLazyParts } from '@/app/lazyParts'
+import { ReaderBridge } from '@/app/readerBridge'
+import { EditorLink } from '@/app/editorLink'
+import { createReadingCommands } from '@/app/reading'
 import type { PaletteCommand } from '@/components/CommandPalette'
 import type { AppHost, Updater } from '@/app/host'
+import { reason } from '@/app/host'
 import type { AppState } from '@/app/types'
-import { READING_FONTS, resolveTheme } from '@/app/appearance'
+import { READING_FONTS, editorFontSize, resolveTheme } from '@/app/appearance'
 import { baseName, dirOf, displayDir, isDirtyIn, isUntitled, unsavedIds, without } from '@/app/model'
 import { buildIndex, buildQuickOpen, buildTabs, buildTree, searchableFiles, type FileMeta } from '@/app/view'
 import { createDocumentActions } from '@/app/documents'
@@ -27,20 +32,18 @@ import { createFileActions } from '@/app/files'
 import { createViewActions } from '@/app/viewActions'
 import { createExportActions } from '@/app/exporting'
 import { createDropTarget } from '@/app/dragDrop'
-import { DOC_MENU, TAB_LIST, documentMenu, fileMenu, folderMenu, tabListMenu, tabMenu, type MenuDeps } from '@/app/menus'
+import type { MenuDeps } from '@/app/menus'
+import { DOC_MENU, TAB_LIST, createMenuControl } from '@/app/menuControl'
 import { buildCommandTable, type CommandTable } from '@/app/commandTable'
 import { createKeyHandler } from '@/app/keyboard'
 import { SettingsWriter, settingsSnapshot } from '@/app/persistence'
 import { RecoveryKeeper } from '@/app/recovery'
 import { bootstrap, restoreRecovered } from '@/app/bootstrap'
 import { initialState } from '@/app/initialState'
-// The CodeMirror editor is only needed in Edit/Split view. Load it lazily so the
-// (large) editor stack stays out of the startup chunk for read-only users.
-const CodeEditor = lazy(() => import('@/components/CodeEditor'))
-
-/** Warm the lazy editor chunk this long after startup, off the critical path. */
-const EDITOR_PREFETCH_DELAY_MS = 2000
+/** Start warming the lazy chunks this long after startup, off the critical path. */
+const PREFETCH_DELAY_MS = 1500
 const NO_SEARCH: SearchResult = { groups: [], total: 0, fileCount: 0 }
+const NO_FIXES: readonly string[] = []
 /** Upper bound on how long a theme switch keeps transitions off. */
 const THEME_SWITCH_MS = 120
 const NARROW_QUERY = '(max-width: 999px)'
@@ -52,9 +55,9 @@ export default class App extends Component<Record<string, never>, AppState> {
   private rootRef = createRef<HTMLDivElement>()
   private index = new Map<string, FileMeta>()
   private memos = new Map<string, { deps: readonly unknown[]; value: unknown }>()
-  private editor: EditorHandle | null = null
-  private wantEditorFocus = false
   private toastSeq = 0
+  /** Why the last image save failed, shown instead of the editor's generic notice. */
+  private imageFailure: string | null = null
   private lastReportedUnsaved = false
   private unsubs: (() => void)[] = []
   private darkQuery = media('(prefers-color-scheme: dark)')
@@ -66,7 +69,8 @@ export default class App extends Component<Record<string, never>, AppState> {
   private reader = new ReaderController({
     readImage: (docPath, src) => window.api.readImage(docPath, src),
     onLink: (href) => this.openLink(href),
-    onToggleTask: () => {},
+    onToggleTask: (line, checked) => this.bridge.onToggleTask(line, checked),
+    onRenderInfo: (info) => this.bridge.onRenderInfo(info),
     onActiveHeading: (slug) => {
       if (slug !== this.state.activeSlug) this.setState({ activeSlug: slug })
     }
@@ -80,13 +84,15 @@ export default class App extends Component<Record<string, never>, AppState> {
     toast: (message, action) => this.setState({ toast: { id: ++this.toastSeq, message, action } }),
     nameOf: (id) => this.nameOf(id),
     renderDoc: (force) => this.renderDoc(force),
-    focusEditor: () => {
-      if (this.editor) this.editor.focus()
-      else this.wantEditorFocus = true
-    }
+    focusEditor: () => this.editorLink.focus()
   }
-  private files = createFileActions(this.host, () => this.docs)
-  private docs = createDocumentActions(this.host, { rescan: () => void this.files.reconcileFolder() })
+  private bridge = new ReaderBridge(this.host)
+  private editorLink = new EditorLink(this.reader, this.platform)
+  private files = createFileActions(this.host, () => this.docs, { onReload: this.bridge.beforeReload })
+  private docs = createDocumentActions(this.host, {
+    rescan: () => void this.files.reconcileFolder(),
+    onReload: this.bridge.beforeReload
+  })
   private view = createViewActions(this.host)
   private exports = createExportActions(this.host)
   private drop = createDropTarget(this.host, this.files)
@@ -97,7 +103,8 @@ export default class App extends Component<Record<string, never>, AppState> {
     files: this.files,
     view: this.view,
     exports: this.exports,
-    renameTarget: () => this.renameTarget()
+    renameTarget: () => this.renameTarget(),
+    reading: createReadingCommands(this.host, this.bridge, this.editorLink)
   })
   private writer = new SettingsWriter((s) => window.api.setSettings(s))
   private recovery = new RecoveryKeeper(this.host)
@@ -156,6 +163,7 @@ export default class App extends Component<Record<string, never>, AppState> {
     this.narrowQuery?.removeEventListener('change', this.onMedia)
     this.compactQuery?.removeEventListener('change', this.onMedia)
     this.unsubs.forEach((u) => u())
+    this.editorLink.dispose()
     this.reader.dispose()
     this.recovery.dispose()
     this.writer.flush()
@@ -174,8 +182,17 @@ export default class App extends Component<Record<string, never>, AppState> {
     }
     if (s.uiScale !== prev.uiScale) void window.api.win.setZoom(s.uiScale).catch(() => undefined)
     if (resolveTheme(s.theme, s.systemDark) !== resolveTheme(prev.theme, prev.systemDark)) this.switchThemeCrisply()
-    if (s.activeId !== prev.activeId) this.setState({ activeSlug: null })
+    if (s.openTabs !== prev.openTabs) {
+      for (const id of prev.openTabs) if (!s.openTabs.includes(id)) this.bridge.closed(id)
+    }
+    if (s.activeId !== prev.activeId) {
+      this.bridge.left(prev.activeId)
+      this.setState({ activeSlug: null, renderFixes: [], blockedImages: 0 })
+    }
+    // The find bar lives in the reader; Edit view has none.
+    if (s.find && (s.viewMode === 'edit' || !s.activeId)) this.setState({ find: null })
     this.renderDoc(false)
+    this.editorLink.sync(s.viewMode === 'split' && s.syncScroll)
     // Not before the session is back: an early write would save an empty tab strip.
     if (s.restored) this.writer.persist(settingsSnapshot(s))
     if (s.contents !== prev.contents || s.saved !== prev.saved) {
@@ -215,6 +232,8 @@ export default class App extends Component<Record<string, never>, AppState> {
   /** Esc leaves focus mode once every overlay has had its turn (they stop the event). */
   private onEscape = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape' || e.defaultPrevented) return
+    // A menu still loading its chunk is not on screen yet: Esc means don't open it.
+    if (this.menus.cancel()) return
     if (this.state.sidebarPeek) this.setState({ sidebarPeek: false })
     else if (this.state.focusMode) this.setState({ focusMode: false })
   }
@@ -222,11 +241,27 @@ export default class App extends Component<Record<string, never>, AppState> {
   private setReaderEl = (el: HTMLDivElement | null): void => this.reader.attach(el)
 
   private onEditorReady = (handle: EditorHandle | null): void => {
-    this.editor = handle
-    if (handle && this.wantEditorFocus) {
-      this.wantEditorFocus = false
-      handle.focus()
+    this.editorLink.ready(handle)
+    this.editorLink.sync(this.state.viewMode === 'split' && this.state.syncScroll)
+  }
+
+  /** Pasted/dropped images land next to the document; untitled ones have no folder yet. */
+  private saveImage = async (file: File): Promise<string | null> => {
+    const id = this.state.activeId
+    if (!id || isUntitled(id)) return null
+    try {
+      return await window.api.writeAsset(id, file.name, new Uint8Array(await file.arrayBuffer()))
+    } catch (err) {
+      const why = reason(err)
+      this.imageFailure = `Couldn't add ${file.name}${why ? ` (${why})` : ''}. Check that the document's folder still exists, then try again.`
+      throw err
     }
+  }
+
+  private editorNotice = (message: string): void => {
+    const text = this.imageFailure ?? message
+    this.imageFailure = null
+    this.host.toast(text)
   }
 
   /** Repaint the reader from current state (cheap when nothing changed). */
@@ -261,12 +296,12 @@ export default class App extends Component<Record<string, never>, AppState> {
         this.renderDoc(true)
       }
     })
-    // Warm the lazy chunks once the first document is up, so the first switch to
-    // Edit/Split (or the first palette) doesn't wait on a parse.
+    // Warm the lazy chunks once the first document is up, so the first palette,
+    // find bar or switch to Edit doesn't wait on a parse.
     setTimeout(() => {
-      requestIdleCallback(prefetchOverlays, { timeout: 5_000 })
-      requestIdleCallback(() => void import('@/components/CodeEditor'), { timeout: 10_000 })
-    }, EDITOR_PREFETCH_DELAY_MS)
+      prefetchLazyParts()
+      this.bridge.prefetch()
+    }, PREFETCH_DELAY_MS)
   }
 
   private discardRecovered = (): void => {
@@ -317,44 +352,12 @@ export default class App extends Component<Record<string, never>, AppState> {
     return id && !isUntitled(id) ? { path: id, isFolder: false } : null
   }
 
-  private openMenu(
-    items: MenuEntry[],
-    e: ReactMouseEvent | ReactKeyboardEvent,
-    keyboard: boolean,
-    label: string
-  ): void {
-    const target = e.currentTarget as HTMLElement
-    const rect = target.getBoundingClientRect()
-    const mouse = 'clientX' in e && !keyboard
-    this.setState({
-      menu: {
-        x: mouse ? (e as ReactMouseEvent).clientX : rect.left + 12,
-        y: mouse ? (e as ReactMouseEvent).clientY : rect.bottom,
-        items,
-        label,
-        keyboard
-      }
-    })
-  }
-
-  private showTabMenu = (id: string, e: ReactMouseEvent | ReactKeyboardEvent, keyboard: boolean): void =>
-    this.openMenu(tabMenu(this.menuDeps, id), e, keyboard, 'Tab actions')
-  private showFileMenu = (id: string, e: ReactMouseEvent | ReactKeyboardEvent, keyboard: boolean): void =>
-    this.openMenu(fileMenu(this.menuDeps, id), e, keyboard, 'File actions')
-  private showFolderMenu = (id: string, e: ReactMouseEvent | ReactKeyboardEvent, keyboard: boolean): void =>
-    this.openMenu(folderMenu(this.menuDeps, id), e, keyboard, 'Folder actions')
-
-  /** A menu hanging from a top-bar button; a second click closes it. */
-  private openAnchoredMenu(anchor: HTMLElement, items: MenuEntry[], label: string, keyboard: boolean): void {
-    if (this.state.menu) return this.setState({ menu: null })
-    const r = anchor.getBoundingClientRect()
-    this.setState({ menu: { x: r.right, y: r.bottom + 6, align: 'end', items, label, keyboard } })
-  }
-
-  private showDocMenu = (anchor: HTMLElement, keyboard: boolean): void =>
-    this.openAnchoredMenu(anchor, documentMenu(this.menuDeps), DOC_MENU, keyboard)
-  private showTabList = (anchor: HTMLElement, keyboard: boolean): void =>
-    this.openAnchoredMenu(anchor, tabListMenu(this.menuDeps, (id) => this.nameOf(id)), TAB_LIST, keyboard)
+  private menus = createMenuControl(this.host, this.menuDeps, (id) => this.nameOf(id))
+  private showTabMenu = this.menus.tab
+  private showFileMenu = this.menus.file
+  private showFolderMenu = this.menus.folder
+  private showDocMenu = this.menus.document
+  private showTabList = this.menus.tabList
 
   private readingAnchor: HTMLElement | null = null
   private toggleReading = (anchor: HTMLElement): void => {
@@ -395,8 +398,13 @@ export default class App extends Component<Record<string, never>, AppState> {
 
   // ---- small handlers passed to components -----------------------------------------
 
-  private onEditorChange = (value: string): void =>
-    this.setState((s) => (s.activeId ? { contents: { ...s.contents, [s.activeId]: value } } : null))
+  /** The editor also echoes text it was given (a reload); only real edits count. */
+  private onEditorChange = (value: string): void => {
+    const id = this.state.activeId
+    if (!id || this.state.contents[id] === value) return
+    this.bridge.edited(id)
+    this.setState((s) => (s.activeId === id ? { contents: { ...s.contents, [id]: value } } : null))
+  }
   private setActive = (id: string): void => this.setState((s) => ({ activeId: id, newPaths: without(s.newPaths, id) }))
   private openFromSidebar = (id: string): void => {
     void this.docs.openFile(id)
@@ -433,18 +441,27 @@ export default class App extends Component<Record<string, never>, AppState> {
   private cancelRename = (): void => this.setState({ renaming: null })
   private setSearch = (searchQuery: string): void => this.setState({ searchQuery })
   private clearRecents = (): void => this.setState({ recents: [] })
+  private format = (cmd: FormatCommand): void => this.editorLink.current?.format(cmd)
+  private closeFind = (): void => this.setState({ find: null })
+  private closeMenu = (): void => this.setState({ menu: null })
+  private loadImages = (): void => this.reader.loadBlockedImages()
   private forgetRecent = (id: string): void => this.setState((s) => ({ recents: s.recents.filter((r) => r !== id) }))
 
   // ---- render --------------------------------------------------------------------
 
   private paletteCommands(): PaletteCommand[] {
-    return COMMANDS.filter((c) => !c.hideInPalette && this.isAvailable(c.id)).map((c) => ({
-      id: c.id,
-      label: commandLabel(c, this.words),
-      group: c.group,
-      keywords: c.keywords ?? '',
-      shortcut: c.shortcuts?.[0] ? this.hint(c.shortcuts[0]) : null
-    }))
+    return COMMANDS.filter((c) => !c.hideInPalette && this.isAvailable(c.id)).map((c) => {
+      const base = commandLabel(c, this.words)
+      const label = this.commands[c.id]?.label?.() ?? base
+      return {
+        id: c.id,
+        label,
+        group: c.group,
+        // A state-following label still answers to the registry's words ("toggle ...").
+        keywords: [c.keywords ?? '', label === base ? '' : base].join(' ').trim(),
+        shortcut: c.shortcuts?.[0] ? this.hint(c.shortcuts[0]) : null
+      }
+    })
   }
 
   private renderSidebar(overlay: boolean) {
@@ -511,66 +528,33 @@ export default class App extends Component<Record<string, never>, AppState> {
 
   private renderDocument(activeId: string) {
     const s = this.state
-    const showEditor = s.viewMode !== 'read'
-    const showReader = s.viewMode !== 'edit'
-    const name = this.nameOf(activeId)
     return (
-      <div className="smd-workspace">
-        <div className="smd-docarea">
-          {s.externalChanges[activeId] && (
-            <div className="smd-conflict" role="alert">
-              <InfoIcon size={16} />
-              <span>This file changed on disk while you had unsaved edits.</span>
-              <button
-                type="button"
-                className="smd-btn smd-btn--sm"
-                onClick={() => void this.docs.reloadFromDisk(activeId, { confirmed: true })}
-              >
-                Reload from disk
-              </button>
-              <button
-                type="button"
-                className="smd-btn smd-btn--sm smd-btn--ghost"
-                onClick={() => this.docs.keepMine(activeId)}
-              >
-                Keep mine
-              </button>
-            </div>
-          )}
-          <div className={'smd-panes' + (s.viewMode === 'split' ? ' smd-panes--split' : '')}>
-            {showEditor && (
-              <div className="smd-editor-pane">
-                {/* Format bar slot (Edit/Split only), wired at integration. */}
-                <div className="smd-editor-host">
-                  <Suspense fallback={null}>
-                    <CodeEditor
-                      key={activeId}
-                      value={s.contents[activeId] ?? ''}
-                      onChange={this.onEditorChange}
-                      isDark={resolveTheme(s.theme, s.systemDark) === 'dark'}
-                      jump={s.editorJump && s.editorJump.fileId === activeId ? s.editorJump : null}
-                      onReady={this.onEditorReady}
-                    />
-                  </Suspense>
-                </div>
-              </div>
-            )}
-            {showReader && (
-              // Positioned pane: the find bar and change bar float inside it.
-              <div className="smd-reader-pane">
-                <div
-                  ref={this.setReaderEl}
-                  className="smd-reader"
-                  role="article"
-                  tabIndex={0}
-                  aria-label={`${name}, rendered`}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-        {this.renderOutline()}
-      </div>
+      <DocumentView
+        id={activeId}
+        name={this.nameOf(activeId)}
+        viewMode={s.viewMode}
+        platform={this.platform}
+        value={s.contents[activeId] ?? ''}
+        isDark={resolveTheme(s.theme, s.systemDark) === 'dark'}
+        editorFontSize={editorFontSize(s.readingSize)}
+        jump={s.editorJump && s.editorJump.fileId === activeId ? s.editorJump : null}
+        conflict={!!s.externalChanges[activeId]}
+        find={s.find}
+        changes={s.changes[activeId] ?? 0}
+        reader={this.reader}
+        outline={this.renderOutline()}
+        setReaderEl={this.setReaderEl}
+        onEditorChange={this.onEditorChange}
+        onEditorReady={this.onEditorReady}
+        onSaveImage={this.saveImage}
+        onNotice={this.editorNotice}
+        onFormat={this.format}
+        onReloadConflict={() => void this.docs.reloadFromDisk(activeId, { confirmed: true })}
+        onKeepMine={() => this.docs.keepMine(activeId)}
+        onCloseFind={this.closeFind}
+        onNextChange={this.bridge.nextChange}
+        onDismissChanges={this.bridge.dismiss}
+      />
     )
   }
 
@@ -593,6 +577,7 @@ export default class App extends Component<Record<string, never>, AppState> {
     const meta = id ? this.index.get(id) : undefined
     const saveState = !id ? null : isUntitled(id) ? 'new' : isDirtyIn(s.contents, s.saved, id) ? 'unsaved' : 'saved'
     const folder = id && !isUntitled(id) ? (meta?.folderName ?? baseName(dirOf(id))) : ''
+    const reading = s.viewMode !== 'edit'
     return (
       <StatusBar
         folder={folder}
@@ -600,6 +585,12 @@ export default class App extends Component<Record<string, never>, AppState> {
         saveState={saveState}
         words={st.words}
         minutes={st.minutes}
+        fixes={reading ? s.renderFixes : NO_FIXES}
+        blockedImages={reading ? s.blockedImages : 0}
+        onLoadImages={this.loadImages}
+        changes={s.changes[id] ?? 0}
+        changesHint={reading ? `Next change (${this.hint('Alt+N')})` : 'Show the changes in Split view'}
+        onChanges={this.bridge.nextChange}
       />
     )
   }
@@ -706,7 +697,13 @@ export default class App extends Component<Record<string, never>, AppState> {
           onDiscard={this.discardRecovered}
           onCloseWindow={(save) => void this.closeWindow(save)}
         />
-        {s.menu && <ContextMenu menu={s.menu} onClose={() => this.setState({ menu: null })} />}
+        {s.menu && (
+          <LazyBoundary>
+            <Suspense fallback={null}>
+              <ContextMenu menu={s.menu} onClose={this.closeMenu} />
+            </Suspense>
+          </LazyBoundary>
+        )}
       </div>
     )
   }

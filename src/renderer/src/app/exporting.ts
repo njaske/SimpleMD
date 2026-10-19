@@ -1,9 +1,9 @@
 // Export and copy of the rendered document: PDF, standalone HTML, rich text, print.
 // Each needs the reader on screen, so Edit view switches to Read first.
-import { articleClipboardPayload, buildStandaloneHtml } from '@/lib/reader/export'
 import type { AppHost } from './host'
 import { reason } from './host'
 import { resolveTheme } from './appearance'
+import { loadExport } from './lazyParts'
 
 /** Time for the reader to mount and paint after leaving Edit view. */
 const READER_SETTLE_MS = 220
@@ -44,6 +44,7 @@ export function createExportActions(host: AppHost) {
   const exportHtml = (): void =>
     withArticle(async (article) => {
       try {
+        const { buildStandaloneHtml } = await loadExport()
         const s = host.state()
         const html = buildStandaloneHtml(article, { title: stem(), theme: resolveTheme(s.theme, s.systemDark) })
         const path = await window.api.exportHtml(stem(), html)
@@ -57,6 +58,7 @@ export function createExportActions(host: AppHost) {
   const copyRichText = (): void =>
     withArticle(async (article) => {
       try {
+        const { articleClipboardPayload } = await loadExport()
         const { html, text } = articleClipboardPayload(article)
         await window.api.writeClipboardRich(html, text)
         host.toast('Copied. Paste it into Docs, Word or an email.')
