@@ -33,6 +33,9 @@ export default defineConfig({
       // there, but the modulepreload polyfill (which uses fetch) does not, so
       // disable it to keep lazy chunks (mermaid, CodeMirror language modes) reliable.
       modulePreload: { polyfill: false },
+      // electron-vite leaves the renderer unminified by default; minifying roughly
+      // halves every chunk, which shortens startup parse time.
+      minify: true,
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/renderer/index.html') }
       }
