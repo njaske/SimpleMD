@@ -66,32 +66,42 @@ SimpleMD renders all of it the way it was meant to look, in a fast desktop app t
 
 | | |
 |---|---|
-| **Math** | Inline `$…$` and display `$$…$$` LaTeX, typeset by KaTeX |
+| **Math** | Inline `$…$` and `\(…\)`, display `$$…$$`, `\[…\]` and ` ```math ` blocks, the way ChatGPT and Claude write them, typeset by KaTeX |
 | **Diagrams** | Mermaid flowcharts, sequence, class, state and more, drawn as crisp vectors that follow your theme |
-| **Code** | Syntax highlighting for fenced code blocks in dozens of languages |
-| **Editing** | CodeMirror 6 editor with find and replace, bracket matching and Markdown highlighting; Read, Split and Edit modes |
-| **Navigation** | Live heading outline, workspace-wide search, pinned and recent files, tabs |
-| **Folders** | Open a whole folder at once, or single files, or drag and drop; files changed on disk reload automatically |
+| **Rich Markdown** | GitHub alerts and Obsidian callouts, footnotes, front matter shown as a tidy properties card, task lists you can tick (the file is updated), tables, highlighted code |
+| **Forgiving** | Common breakage in AI output (an unclosed code fence, a table missing its divider row, curly quotes in a diagram) is repaired for display, never in your file |
+| **Made for AI work** | Paste a chat answer as a new document in one keystroke. When an agent edits an open file, SimpleMD highlights what changed and can follow a file as it grows. New files get a dot; `AGENTS.md`, `CLAUDE.md` and friends get their own group |
+| **Reading** | Bundled Literata, Inter, JetBrains Mono and Atkinson Hyperlegible, so text looks the same on every computer. Light, dark, sepia or follow the system; text size, line height, width, accent colour, interface scale; focus mode |
+| **Editing** | CodeMirror 6 with a formatting bar, Markdown shortcuts, smart paste (web pages, Word and Excel become Markdown and tables), pasted or dropped images saved next to the document, and synced scrolling in Split view |
+| **Files** | New document, Save As, rename, duplicate, new file and folder, move to the Recycle Bin. Open a whole folder or single files, or drag and drop. Changes on disk reload automatically, and unsaved work survives a crash |
+| **Navigation** | Command palette, Quick Open, find in document, search across files, outline that follows your reading, pinned and recent files, tabs |
+| **Export** | PDF, a single self-contained HTML file, print, or copy as rich text to paste into Docs, Word or email |
 | **Windows integration** | Shows up in Explorer's "Open with" for `.md`, `.markdown`, `.mdx` and friends; double-click to open |
-| **Export** | Ctrl+P for a clean A4 PDF with equations, diagrams and code intact |
-| **Privacy** | No account, no telemetry, no update checks. The app never phones home; the only thing it ever fetches is an image a document itself links to on the web |
+| **Privacy** | No account, no telemetry, no update checks. The app never phones home; the only thing it ever fetches is an image a document itself links to on the web, and you can block those too |
 
 ### Keyboard shortcuts
 
+On macOS use `Cmd` where this says `Ctrl`. Press `Ctrl` `/` in the app for the full list.
+
 | Action | Shortcut |
 |---|---|
-| Search all files | `Ctrl` `F` |
-| Save | `Ctrl` `S` |
-| Export to PDF | `Ctrl` `P` |
-| Close tab | `Ctrl` `W` |
+| Command palette | `Ctrl` `K` |
+| Quick Open | `Ctrl` `P` |
+| New document / paste from AI | `Ctrl` `N` / `Ctrl` `Shift` `V` |
+| Save / Save as | `Ctrl` `S` / `Ctrl` `Shift` `S` |
+| Read / Split / Edit | `Ctrl` `1` / `Ctrl` `2` / `Ctrl` `3` |
+| Find in document / search all files | `Ctrl` `F` / `Ctrl` `Shift` `F` |
+| Close tab / reopen closed tab | `Ctrl` `W` / `Ctrl` `Shift` `T` |
 | Toggle sidebar / outline | `Ctrl` `B` / `Ctrl` `\` |
-| Switch theme | `Ctrl` `Shift` `D` |
+| Focus mode | `Ctrl` `.` |
+| Export to PDF | `Ctrl` `Shift` `E` |
+| Settings | `Ctrl` `,` |
 
 <br>
 
 ## Download
 
-Grab the [latest release](https://github.com/njaske/SimpleMD/releases/latest). Windows 10 and 11, 64-bit.
+Grab the [latest release](https://github.com/njaske/SimpleMD/releases/latest). Windows 10 and 11, 64-bit. From 1.1 the release workflow also builds macOS (Intel and Apple Silicon) and Linux (AppImage, `.deb`, `.rpm`) packages.
 
 | File | Best for |
 |---|---|
@@ -150,7 +160,7 @@ Full details and how to report a vulnerability privately: [SECURITY.md](SECURITY
 
 ## Build from source
 
-Requires [Node.js](https://nodejs.org) 22.12 or newer.
+Requires [Node.js](https://nodejs.org) 22.15 or newer.
 
 ```bash
 git clone https://github.com/njaske/SimpleMD.git
@@ -158,6 +168,7 @@ cd SimpleMD
 npm ci
 npm run dev        # run with hot reload
 npm test           # unit tests
+npm run test:e2e   # end-to-end tests that drive the built app
 npm run dist:win   # build the installer and portable exe into dist/
 ```
 

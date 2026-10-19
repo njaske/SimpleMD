@@ -1,6 +1,6 @@
 {
   "name": "simplemd",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "A fast, private desktop Markdown reader for AI-generated docs, with KaTeX math and Mermaid diagrams.",
   "keywords": [
     "markdown",
@@ -10,7 +10,9 @@
     "mermaid",
     "electron",
     "desktop",
-    "windows"
+    "windows",
+    "macos",
+    "linux"
   ],
   "homepage": "https://njaske.github.io/SimpleMD/",
   "bugs": {
@@ -23,7 +25,7 @@
   "license": "MIT",
   "author": "njaske",
   "engines": {
-    "node": ">=22.12"
+    "node": ">=22.15"
   },
   "main": "./out/main/index.js",
   "scripts": {
