@@ -4,6 +4,8 @@
 // This runs on the UI thread every time an agent writes the file, so big inputs are first
 // split at lines that occur once on each side (patience diff) and the precise diff only
 // ever sees small gaps; a gap too different to diff cheaply is marked line by line.
+// Load this module lazily (`await import('@/lib/logic/changes')`) the first time a file
+// changes on disk: it pulls in `diff`, which must stay out of the startup chunk (spec 8.3).
 import { diffArrays } from 'diff'
 import type { LineRange } from '@/lib/ranges'
 

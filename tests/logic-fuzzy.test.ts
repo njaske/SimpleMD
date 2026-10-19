@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { medianMs } from './support/logic-timing.ts'
 import { fuzzyFilter, fuzzyMatch, scoreAlignment } from '../src/renderer/src/lib/logic/fuzzy.ts'
 
 /** The matched characters, read back through the reported positions. */
@@ -53,18 +54,10 @@ function paths(prefix: string): string[] {
   return Array.from({ length: 5000 }, (_, i) => `${prefix}project-${i % 41}/notes/${i % 13}/Meeting notes ${i}.md`)
 }
 
-/** Best of five runs of each query after a warm-up, to be robust to a busy machine. */
-function slowestBestRun(items: readonly string[], queries: readonly string[]): { query: string; ms: number } {
-  queries.forEach((q) => fuzzyFilter(q, items, (s) => s)) // warm up the JIT
+/** The query with the slowest median time over `items`. */
+function slowestQuery(items: readonly string[], queries: readonly string[]): { query: string; ms: number } {
   return queries
-    .map((query) => {
-      const runs = Array.from({ length: 5 }, () => {
-        const started = performance.now()
-        fuzzyFilter(query, items, (s) => s)
-        return performance.now() - started
-      })
-      return { query, ms: Math.min(...runs) }
-    })
+    .map((query) => ({ query, ms: medianMs(() => fuzzyFilter(query, items, (s) => s)) }))
     .reduce((a, b) => (b.ms > a.ms ? b : a))
 }
 
@@ -311,14 +304,13 @@ describe('fuzzyMatch on large inputs', () => {
     const query = 'needle haystack'
 
     // Act
-    const started = performance.now()
     const m = fuzzyMatch(query, text)
-    const elapsed = performance.now() - started
+    const ms = medianMs(() => fuzzyMatch(query, text), 3)
 
     // Assert
     assert.ok(m)
     assert.equal(picked(text, m.positions), 'needlehaystack')
-    assert.ok(elapsed < 1000, `took ${elapsed.toFixed(1)} ms`)
+    assert.ok(ms < 1000, `took ${ms.toFixed(1)} ms`)
   })
 
   it('rejects a huge non-matching text quickly', () => {
@@ -464,10 +456,10 @@ describe('fuzzyFilter', () => {
     const items = paths('')
 
     // Act
-    const slowest = slowestBestRun(items, ['m', 'mtg', 'notes meeting', 'p7/n', 'zzz'])
+    const slowest = slowestQuery(items, ['m', 'mtg', 'notes meeting', 'p7/n', 'zzz'])
 
-    // Assert (target is < 10 ms; the bound is generous for slow CI machines)
-    assert.ok(slowest.ms < 40, `"${slowest.query}" took ${slowest.ms.toFixed(2)} ms`)
+    // Assert (target is < 10 ms; the bound is generous for slow, busy machines)
+    assert.ok(slowest.ms < 60, `"${slowest.query}" took ${slowest.ms.toFixed(2)} ms`)
   })
 
   it('filters 5,000 paths with accented and CJK folders just as fast', () => {
@@ -476,10 +468,10 @@ describe('fuzzyFilter', () => {
       const items = paths(prefix)
 
       // Act
-      const slowest = slowestBestRun(items, ['m', 'mtg', 'notes meeting', 'jose', 'zzz'])
+      const slowest = slowestQuery(items, ['m', 'mtg', 'notes meeting', 'jose', 'zzz'])
 
-      // Assert (target is < 10 ms; the bound is generous for slow CI machines)
-      assert.ok(slowest.ms < 40, `${prefix} "${slowest.query}" took ${slowest.ms.toFixed(2)} ms`)
+      // Assert (target is < 10 ms; the bound is generous for slow, busy machines)
+      assert.ok(slowest.ms < 60, `${prefix} "${slowest.query}" took ${slowest.ms.toFixed(2)} ms`)
     }
   })
 

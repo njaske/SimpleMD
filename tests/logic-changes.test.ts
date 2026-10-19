@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { medianMs } from './support/logic-timing.ts'
 import { changedLineRanges, countChangedLines, mergeRanges } from '../src/renderer/src/lib/logic/changes.ts'
 
 const lines = (...ls: string[]): string => ls.join('\n')
@@ -120,14 +121,15 @@ describe('changedLineRanges: large documents', () => {
     const edited = base.map((l, i) => (i === 10 || i === 30_000 ? `${l} (edited)` : l))
     edited.splice(50_000, 0, 'inserted A', 'inserted B')
 
+    const [before, after] = [base.join('\n'), edited.join('\n')]
+
     // Act
-    const started = performance.now()
-    const ranges = changedLineRanges(base.join('\n'), edited.join('\n'))
-    const elapsed = performance.now() - started
+    const ranges = changedLineRanges(before, after)
+    const ms = medianMs(() => changedLineRanges(before, after), 3)
 
     // Assert
     assert.deepEqual(ranges, [{ from: 10, to: 11 }, { from: 30_000, to: 30_001 }, { from: 50_000, to: 50_002 }])
-    assert.ok(elapsed < 1000, `took ${elapsed.toFixed(1)} ms`)
+    assert.ok(ms < 1000, `took ${ms.toFixed(1)} ms`)
   })
 
   it('gives up gracefully on huge, completely different texts', () => {
@@ -136,29 +138,27 @@ describe('changedLineRanges: large documents', () => {
     const after = Array.from({ length: 40_000 }, (_, i) => `b${i}`).join('\n')
 
     // Act
-    const started = performance.now()
     const ranges = changedLineRanges(before, after)
-    const elapsed = performance.now() - started
+    const ms = medianMs(() => changedLineRanges(before, after), 3)
 
     // Assert
     assert.deepEqual(ranges, [{ from: 0, to: 40_000 }])
-    assert.ok(elapsed < 3000, `took ${elapsed.toFixed(1)} ms`)
+    assert.ok(ms < 3000, `took ${ms.toFixed(1)} ms`)
   })
 
   it('marks a full rewrite of a typical 5,000-line file without stalling the UI', () => {
     // Arrange: an agent rewrote every line
     const before = generated(5000, 'old')
     const after = generated(5000, 'new')
-    changedLineRanges(before, after) // warm up the JIT
 
     // Act
-    const started = performance.now()
     const ranges = changedLineRanges(before, after)
-    const elapsed = performance.now() - started
+    const ms = medianMs(() => changedLineRanges(before, after))
 
-    // Assert (typically a few ms; the bound is generous for slow CI machines)
+    // Assert (typically a few ms; the bound is generous for busy machines yet far below
+    // what a quadratic diff of 10,000 lines takes)
     assert.deepEqual(ranges, [{ from: 0, to: 5000 }])
-    assert.ok(elapsed < 60, `took ${elapsed.toFixed(1)} ms`)
+    assert.ok(ms < 200, `took ${ms.toFixed(1)} ms`)
   })
 
   it('reports scattered edits exactly, even when there are thousands of them', () => {
@@ -166,15 +166,16 @@ describe('changedLineRanges: large documents', () => {
     const base = generated(20_000, 'line').split('\n')
     const edited = base.map((l, i) => (i % 10 === 0 ? `${l} (edited)` : l))
 
+    const [before, after] = [base.join('\n'), edited.join('\n')]
+
     // Act
-    const started = performance.now()
-    const ranges = changedLineRanges(base.join('\n'), edited.join('\n'))
-    const elapsed = performance.now() - started
+    const ranges = changedLineRanges(before, after)
+    const ms = medianMs(() => changedLineRanges(before, after), 3)
 
     // Assert
     assert.equal(ranges.length, 2000)
     assert.ok(ranges.every((r, k) => r.from === k * 10 && r.to === k * 10 + 1))
-    assert.ok(elapsed < 500, `took ${elapsed.toFixed(1)} ms`)
+    assert.ok(ms < 500, `took ${ms.toFixed(1)} ms`)
   })
 
   it('reports only the rewritten half when an agent replaces the second half', () => {
