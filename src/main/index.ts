@@ -1,13 +1,41 @@
 import { app, BrowserWindow, Menu, nativeTheme, session, shell } from 'electron'
-import { join } from 'path'
+import { mkdirSync } from 'fs'
+import { join, resolve } from 'path'
 import { openFromSecondInstance, prepareLaunch, registerIpc, restoreAccess } from './ipc'
 import { extractLaunchPaths } from './launch'
-import { macMenuTemplate, usesSpellcheck, windowBackground, windowChrome } from './platform'
+import {
+  APP_NAME,
+  clampZoom,
+  macMenuTemplate,
+  usesSpellcheck,
+  windowBackground,
+  windowChrome
+} from './platform'
 import { loadSettings, saveSettings, settingsWritten } from './settings'
 
 const RENDERER_DEV_URL = process.env['ELECTRON_RENDERER_URL']
 const isDev = !!RENDERER_DEV_URL
 const isMac = process.platform === 'darwin'
+
+/** The app's name and data folder. Runs first, before anything reads settings
+ *  or takes the single-instance lock (which lives in the data folder). */
+function configureAppIdentity(): void {
+  // package.json's name is "simplemd"; the macOS app menu reads app.name.
+  // Keep the data folder that name gave every earlier version: on Linux
+  // ~/.config/SimpleMD would be a different, empty folder.
+  const userData = app.getPath('userData')
+  app.setName(APP_NAME)
+  app.setPath('userData', userData)
+  // Isolated end-to-end runs use a throwaway folder (never in a packaged build).
+  const testData = process.env['SIMPLEMD_USER_DATA']
+  if (!app.isPackaged && testData) {
+    const folder = resolve(testData)
+    mkdirSync(folder, { recursive: true }) // setPath refuses a missing folder
+    app.setPath('userData', folder)
+  }
+}
+
+configureAppIdentity()
 
 // Strict CSP in production (bundled code only); permissive in development so the
 // Vite dev server's inline HMR scripts work. Only remote scripts are ever
@@ -133,7 +161,9 @@ async function createWindow(): Promise<BrowserWindow> {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      spellcheck: usesSpellcheck(process.platform)
+      spellcheck: usesSpellcheck(process.platform),
+      // The UI scale from the first paint; win:setZoom applies later changes.
+      zoomFactor: clampZoom(settings.uiScale)
     }
   })
 
@@ -192,8 +222,8 @@ function installMenu(): void {
     Menu.setApplicationMenu(null)
     return
   }
-  app.setAboutPanelOptions({ applicationName: 'SimpleMD', copyright: 'Copyright © 2026 njaske' })
-  Menu.setApplicationMenu(Menu.buildFromTemplate(macMenuTemplate(app.name)))
+  app.setAboutPanelOptions({ applicationName: APP_NAME, copyright: 'Copyright © 2026 njaske' })
+  Menu.setApplicationMenu(Menu.buildFromTemplate(macMenuTemplate(APP_NAME)))
 }
 
 const gotLock = app.requestSingleInstanceLock()

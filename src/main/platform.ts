@@ -28,6 +28,21 @@ export function usesSpellcheck(platform: NodeJS.Platform): boolean {
   return platform === 'win32' || platform === 'darwin'
 }
 
+/** The product name, as users should read it in menus. package.json's `name` is
+ *  "simplemd", which Electron would otherwise show ("Quit simplemd"). */
+export const APP_NAME = 'SimpleMD'
+
+/** Bounds of the UI scale (Settings.uiScale), applied as the page zoom factor. */
+export const MIN_ZOOM = 0.8
+export const MAX_ZOOM = 1.5
+
+/** A zoom factor within bounds; 1 for anything that isn't a finite number (a
+ *  hand-edited settings file must not open an unusable window). */
+export function clampZoom(factor: unknown): number {
+  if (typeof factor !== 'number' || !Number.isFinite(factor)) return 1
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, factor))
+}
+
 /** The minimal native menu macOS needs: without it Cmd+Q/H/M and the clipboard
  *  shortcuts don't work at all. Only roles whose standard shortcuts don't clash
  *  with the app's own (Cmd+N/O/S/W/P/K/B/E/F/T/1/2/3 ... stay with the page), so
@@ -37,15 +52,16 @@ export function macMenuTemplate(appName: string): MenuItemConstructorOptions[] {
     {
       label: appName,
       submenu: [
-        { role: 'about' },
+        // Explicit labels: the roles would take them from package.json's name.
+        { role: 'about', label: `About ${appName}` },
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
-        { role: 'hide' },
+        { role: 'hide', label: `Hide ${appName}` },
         { role: 'hideOthers' },
         { role: 'unhide' },
         { type: 'separator' },
-        { role: 'quit' }
+        { role: 'quit', label: `Quit ${appName}` }
       ]
     },
     {

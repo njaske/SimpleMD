@@ -42,9 +42,12 @@ const BUNDLE_EXTENSIONS: ReadonlySet<string> = new Set([
   '.app', '.pkg', '.mpkg', '.workflow', '.action', '.prefpane', '.kext', '.scptd'
 ])
 
+// NTFS counts UTF-16 units, ext4 and APFS count UTF-8 bytes; both cap at 255.
 const MAX_NAME_LENGTH = 255
+const MAX_NAME_BYTES = 255
 const MAX_COPIES = 1000
-const RESERVED_NAME = /^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(\..*)?$/i
+// COM0 and LPT0 are reserved too, per Microsoft's current naming rules.
+const RESERVED_NAME = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i
 const FORBIDDEN_CHAR = /[<>:"|?*\u0000-\u001f\u007f]/
 // Bidi overrides can disguise an extension ("report‮dm.exe" shows as "reportexe.md").
 const BIDI_CONTROL = /[‪-‮⁦-⁩]/
@@ -62,27 +65,45 @@ export function hasUnsafeExtension(name: string): boolean {
   return UNSAFE_EXTENSIONS.has(extname(name).toLowerCase())
 }
 
-/** Why `name` can't be used as a bare file or folder name, or null when it's fine.
- *  Checked on every OS, because files travel between Windows, macOS and Linux. */
-export function nameProblem(name: unknown, kind: NameKind): string | null {
+/** Why `name` can't be a file or folder name, ignoring what type of file it is
+ *  (see nameProblem). Create and rename check the typed name with this, because
+ *  the name they write may still gain ".md" ("Learning Next.js" becomes
+ *  "Learning Next.js.md"); the final name then gets the full check. */
+export function nameShapeProblem(name: unknown, kind: NameKind): string | null {
   if (typeof name !== 'string' || name.trim() === '') return 'Enter a name.'
   if (name === '.' || name === '..') return 'That name is reserved.'
   if (/[\\/]/.test(name)) return 'A name can’t contain / or \\.'
   if (FORBIDDEN_CHAR.test(name)) return 'A name can’t contain < > : " | ? * or control characters.'
   if (BIDI_CONTROL.test(name)) return 'A name can’t contain text-direction characters.'
   if (/[. ]$/.test(name)) return 'A name can’t end with a dot or a space.'
-  if (name.length > MAX_NAME_LENGTH) return 'That name is too long.'
+  if (name.length > MAX_NAME_LENGTH || Buffer.byteLength(name, 'utf8') > MAX_NAME_BYTES) {
+    return 'That name is too long.'
+  }
   if (RESERVED_NAME.test(name)) return 'That name is reserved by Windows.'
   // The workspace tree never lists these, so the new item would seem to vanish.
   if (name.startsWith('.')) return 'Names starting with a dot are hidden. Choose another name.'
   if (kind === 'folder' && HIDDEN_FOLDER_NAMES.has(name)) {
     return `Folders named “${name}” are hidden from the file list. Choose another name.`
   }
+  return null
+}
+
+/** Why `name` can't be used as the final name of a file or folder, or null when
+ *  it's fine. Checked on every OS, because files travel between Windows, macOS
+ *  and Linux. */
+export function nameProblem(name: unknown, kind: NameKind): string | null {
+  const shape = nameShapeProblem(name, kind)
+  if (shape || typeof name !== 'string') return shape
   if (kind === 'file' && hasUnsafeExtension(name)) return 'SimpleMD can’t create files of that type.'
   if (kind === 'folder' && BUNDLE_EXTENSIONS.has(extname(name).toLowerCase())) {
     return 'SimpleMD can’t create folders with that ending.'
   }
   return null
+}
+
+function assertNameShape(name: unknown, kind: NameKind): asserts name is string {
+  const problem = nameShapeProblem(name, kind)
+  if (problem) throw new Error(problem)
 }
 
 export function assertValidName(name: unknown, kind: NameKind): asserts name is string {
@@ -103,7 +124,7 @@ function existsError(name: string): Error {
 /** Create a new Markdown file in `dir` (".md" is added when missing). Fails if
  *  the file exists. Returns the new file's absolute path. */
 export async function createFile(dir: string, name: unknown, content: string): Promise<string> {
-  assertValidName(name, 'file')
+  assertNameShape(name, 'file')
   const fileName = withMarkdownExtension(name)
   assertValidName(fileName, 'file')
   const target = join(dir, fileName)
@@ -172,7 +193,7 @@ async function isSameEntry(source: string, target: string, a: Stats, b: Stats): 
 export async function renamePath(path: string, newName: unknown): Promise<string> {
   const source = await fs.lstat(path)
   const kind: NameKind = source.isDirectory() ? 'folder' : 'file'
-  assertValidName(newName, kind)
+  assertNameShape(newName, kind)
   const finalName = kind === 'file' ? renamedFileName(basename(path), newName) : newName
   assertValidName(finalName, kind)
   const target = join(dirname(path), finalName)

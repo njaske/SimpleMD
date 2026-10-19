@@ -101,6 +101,9 @@ describe('sanitizeStem / assetName', () => {
   it('never produces a Windows device name', () => {
     assert.equal(sanitizeStem('CON.png'), 'con-image')
     assert.equal(sanitizeStem('lpt1.gif'), 'lpt1-image')
+    assert.equal(sanitizeStem('COM0.png'), 'com0-image')
+    assert.equal(sanitizeStem('lpt0.webp'), 'lpt0-image')
+    assert.equal(sanitizeStem('com10.png'), 'com10')
   })
 
   it('numbers later names', () => {

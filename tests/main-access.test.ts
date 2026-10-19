@@ -7,8 +7,10 @@ import {
   approveFile,
   approveRoot,
   containsApprovedRoot,
+  grantKey,
   isApproved,
   isApprovedFile,
+  isApprovedRoot,
   isInsideApprovedRoot,
   moveFileGrants,
   resetAccess,
@@ -75,6 +77,29 @@ describe('containsApprovedRoot', () => {
     assert.equal(containsApprovedRoot(outside), false)
     assert.equal(containsApprovedRoot('relative'), false)
   })
+
+  it('forgets a subfolder root once its parent is opened, keeping its access', () => {
+    approveRoot(join(workspace, 'sub'))
+    approveRoot(workspace)
+    assert.equal(containsApprovedRoot(join(workspace, 'sub')), false)
+    assert.equal(isApprovedRoot(join(workspace, 'sub')), false)
+    assert.equal(isApproved(join(workspace, 'sub', 'a.md')), true)
+    assert.equal(containsApprovedRoot(workspace), true)
+  })
+
+  it('keeps earlier roots elsewhere, so their open documents still save', () => {
+    approveRoot(outside)
+    approveRoot(workspace)
+    assert.equal(isApproved(join(outside, 'secret.md')), true)
+    assert.equal(isApprovedRoot(outside), true)
+  })
+
+  it('keeps a parent root when a subfolder is opened after it', () => {
+    approveRoot(workspace)
+    approveRoot(join(workspace, 'sub'))
+    assert.equal(isApprovedRoot(workspace), true)
+    assert.equal(isApprovedRoot(join(workspace, 'sub')), true)
+  })
 })
 
 describe('revokeFile / moveFileGrants', () => {
@@ -105,6 +130,20 @@ describe('revokeFile / moveFileGrants', () => {
     assert.equal(moveFileGrants(folder, join(base, 'moved-folder')), 1)
     assert.equal(isApproved(join(base, 'moved-folder', 'a.md')), true)
     assert.equal(isApproved(join(folder, 'a.md')), false)
+  })
+
+  it('moves a grant by the key taken before the rename', async () => {
+    const from = join(outside, 'before.md')
+    const to = join(outside, 'after.md')
+    await writeFile(from, 'x')
+    approveFile(from)
+    const fromKey = grantKey(from)
+    await rename(from, to)
+    // On a case-insensitive macOS disk `from` would now resolve to `to`; the
+    // key taken earlier still names the stored grant.
+    assert.equal(moveFileGrants(join(outside, 'unrelated.md'), to, fromKey), 1)
+    assert.equal(isApprovedFile(to), true)
+    assert.equal(isApprovedFile(from), false)
   })
 
   it('moves nothing for unrelated paths', () => {

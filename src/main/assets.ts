@@ -10,7 +10,8 @@ export const MAX_ASSET_BYTES = 25 * 1024 * 1024
 export const ASSETS_DIR = 'assets'
 const MAX_STEM_LENGTH = 40
 const MAX_ATTEMPTS = 1000
-const RESERVED_STEM = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/
+// COM0 and LPT0 are reserved too (Microsoft's current naming rules).
+const RESERVED_STEM = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/
 
 export type ImageExt = 'png' | 'jpg' | 'gif' | 'webp' | 'bmp' | 'avif'
 

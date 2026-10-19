@@ -11,6 +11,7 @@ import {
   createFolder,
   duplicateFile,
   nameProblem,
+  nameShapeProblem,
   rebasePath,
   rebasePaths,
   renamePath,
@@ -76,10 +77,22 @@ describe('nameProblem', () => {
     assert.equal(nameProblem('com10.md', 'file'), null)
   })
 
+  it('rejects COM0 and LPT0, which Windows reserves as well', () => {
+    for (const name of ['COM0', 'com0.md', 'LPT0.txt', 'lpt0']) {
+      assert.match(nameProblem(name, 'file') ?? '', /reserved/, name)
+    }
+  })
+
   it('rejects names ending in a dot or a space, and overlong names', () => {
     assert.ok(nameProblem('notes.', 'file'))
     assert.ok(nameProblem('notes ', 'folder'))
     assert.ok(nameProblem(`${'a'.repeat(253)}.md`, 'file'))
+  })
+
+  it('counts UTF-8 bytes too, since ext4 and APFS cap names at 255 bytes', () => {
+    const cjk = `${'文'.repeat(90)}.md` // 93 characters, 273 bytes
+    assert.match(nameProblem(cjk, 'file') ?? '', /too long/)
+    assert.equal(nameProblem(`${'文'.repeat(84)}.md`, 'file'), null) // 255 bytes
   })
 
   it('rejects runnable file types for files but not for folders', () => {
@@ -166,6 +179,22 @@ describe('withMarkdownExtension / renamedFileName / copyName', () => {
   })
 })
 
+describe('nameShapeProblem', () => {
+  it('accepts titles whose ending only looks runnable, as typed before ".md" is added', () => {
+    for (const name of ['Learning Next.js', 'Intro to Node.js', 'evil.exe', 'Vue.js']) {
+      assert.equal(nameShapeProblem(name, 'file'), null, name)
+      assert.ok(nameProblem(name, 'file'), name)
+    }
+  })
+
+  it('still rejects separators, reserved, hidden and overlong names', () => {
+    for (const name of ['a/b', '..', 'CON', '.hidden', 'end.', 'x'.repeat(256)]) {
+      assert.ok(nameShapeProblem(name, 'file'), name)
+    }
+    assert.ok(nameShapeProblem('node_modules', 'folder'))
+  })
+})
+
 describe('createFile', () => {
   it('creates a Markdown file with the given content and adds .md', async () => {
     const path = await createFile(dir, 'Ideas', '# Ideas\n')
@@ -182,10 +211,28 @@ describe('createFile', () => {
   it('refuses invalid and traversal names without touching the disk', async () => {
     await assert.rejects(createFile(dir, '../escape', 'x'), /can’t contain/)
     await assert.rejects(createFile(dir, 'nul', 'x'), /reserved/)
-    await assert.rejects(createFile(dir, 'evil.exe', 'x'))
     await assert.rejects(createFile(dir, '.notes', 'x'), /dot/)
     assert.deepEqual(await readdir(dir), [])
     assert.deepEqual((await readdir(base)).filter((n) => n.startsWith('escape')), [])
+  })
+})
+
+describe('createFile with a runnable-looking ending', () => {
+  it('adds .md to "Learning Next.js" instead of refusing it', async () => {
+    const path = await createFile(dir, 'Learning Next.js', '# Next')
+    assert.equal(path, join(dir, 'Learning Next.js.md'))
+    assert.equal(await readFile(path, 'utf8'), '# Next')
+  })
+
+  it('turns any typed type into a Markdown document', async () => {
+    assert.equal(await createFile(dir, 'evil.exe', 'x'), join(dir, 'evil.exe.md'))
+    assert.equal(await createFile(dir, 'x.command', 'x'), join(dir, 'x.command.md'))
+    assert.deepEqual((await readdir(dir)).sort(), ['evil.exe.md', 'x.command.md'])
+  })
+
+  it('refuses a name that is too long once ".md" is added', async () => {
+    await assert.rejects(createFile(dir, 'a'.repeat(254), 'x'), /too long/)
+    assert.deepEqual(await readdir(dir), [])
   })
 })
 
@@ -263,7 +310,6 @@ describe('renamePath', () => {
     await writeFile(join(dir, 'a.md'), 'A')
     await assert.rejects(renamePath(join(dir, 'a.md'), '../a.md'))
     await assert.rejects(renamePath(join(dir, 'a.md'), 'sub/a.md'))
-    await assert.rejects(renamePath(join(dir, 'a.md'), 'a.cmd'))
     await assert.rejects(renamePath(join(dir, 'a.md'), 'a.md '))
     assert.deepEqual(await readdir(dir), ['a.md'])
   })
@@ -275,12 +321,18 @@ describe('renamePath', () => {
     assert.deepEqual(await readdir(dir), ['Version 1.2.md'])
   })
 
-  it('refuses to rename a document into a macOS or Linux launcher', async () => {
+  it('keeps a document a document when the new name ends like a program', async () => {
     await writeFile(join(dir, 'a.md'), 'A')
-    await assert.rejects(renamePath(join(dir, 'a.md'), 'x.command'), /type/)
-    await assert.rejects(renamePath(join(dir, 'a.md'), 'x.terminal'), /type/)
-    await assert.rejects(renamePath(join(dir, 'a.md'), 'x.desktop'), /type/)
-    assert.deepEqual(await readdir(dir), ['a.md'])
+    assert.equal(await renamePath(join(dir, 'a.md'), 'Intro to Node.js'), join(dir, 'Intro to Node.js.md'))
+    assert.equal(await renamePath(join(dir, 'Intro to Node.js.md'), 'x.command'), join(dir, 'x.command.md'))
+    assert.equal(await renamePath(join(dir, 'x.command.md'), 'a.cmd'), join(dir, 'a.cmd.md'))
+    assert.deepEqual(await readdir(dir), ['a.cmd.md'])
+  })
+
+  it('refuses a rename whose final name would be runnable', async () => {
+    await writeFile(join(dir, 'tool.js'), 'x')
+    await assert.rejects(renamePath(join(dir, 'tool.js'), 'other'), /type/)
+    assert.deepEqual(await readdir(dir), ['tool.js'])
   })
 
   it('refuses hidden names for files and folders', async () => {

@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { MenuItemConstructorOptions } from 'electron'
 import {
+  APP_NAME,
+  MAX_ZOOM,
+  MIN_ZOOM,
   WINDOW_BACKGROUND,
+  clampZoom,
   macMenuTemplate,
   usesSpellcheck,
   windowBackground,
@@ -76,5 +80,27 @@ describe('macMenuTemplate', () => {
 
   it('names the app menu after the app', () => {
     assert.equal(macMenuTemplate('SimpleMD')[0].label, 'SimpleMD')
+  })
+
+  it('labels About, Hide and Quit with the product name, not the package name', () => {
+    const label = (role: string): unknown => items.find((item) => item.role === role)?.label
+    assert.equal(label('about'), 'About SimpleMD')
+    assert.equal(label('hide'), 'Hide SimpleMD')
+    assert.equal(label('quit'), 'Quit SimpleMD')
+    assert.equal(APP_NAME, 'SimpleMD')
+  })
+})
+
+describe('clampZoom', () => {
+  it('keeps a UI scale inside the supported range', () => {
+    assert.equal(clampZoom(1.25), 1.25)
+    assert.equal(clampZoom(3), MAX_ZOOM)
+    assert.equal(clampZoom(0.1), MIN_ZOOM)
+  })
+
+  it('falls back to 100% for anything that is not a finite number', () => {
+    for (const value of [undefined, null, '1.2', Number.NaN, Number.POSITIVE_INFINITY]) {
+      assert.equal(clampZoom(value), 1, String(value))
+    }
   })
 })

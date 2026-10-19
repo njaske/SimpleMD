@@ -103,6 +103,27 @@ describe('renameApproved', () => {
     assert.deepEqual(await readdir(root), ['notes'])
   })
 
+  it('renames a subfolder that was the workspace before its parent was opened', async () => {
+    const store = memoryStore()
+    await grants.persistRootGrant(store, join(root, 'notes'))
+    await grants.persistRootGrant(store, root)
+    const next = await ops.renameApproved(store, join(root, 'notes'), 'Journal')
+    assert.equal(next, join(root, 'Journal'))
+    assert.equal(access.isApproved(join(root, 'Journal', 'a.md')), true)
+  })
+
+  it('keeps a loose file’s access after a case-only rename', async () => {
+    const doc = join(loose, 'notes.md')
+    await writeFile(doc, 'x')
+    const store = memoryStore()
+    await grants.persistFileGrants(store, [doc])
+    const next = await ops.renameApproved(store, doc, 'Notes.md')
+    assert.equal(next, join(loose, 'Notes.md'))
+    assert.equal(access.isApproved(next), true)
+    assert.deepEqual(await readdir(loose), ['Notes.md'])
+    assert.deepEqual((await store.load()).approvedFiles, [next])
+  })
+
   it('refuses a folder outside every workspace, even if it was granted like a file', async () => {
     const folder = join(loose, 'folder')
     await mkdir(folder)

@@ -6,7 +6,7 @@ import { forgetPath, grantFiles, grantRoot } from './grants'
 import { registerWorkspaceIpc } from './ipc-workspace'
 import { loadSettings, saveSettings } from './settings'
 import { extractLaunchPaths } from './launch'
-import { windowBackground } from './platform'
+import { clampZoom, windowBackground } from './platform'
 import { pickRendererSettings } from './settings-schema'
 import { watchFolder } from './watcher'
 import type { DropResult } from '../shared/types'
@@ -72,8 +72,6 @@ function denied(): never {
   throw new Error('Access denied: this path was not opened in SimpleMD')
 }
 
-const MIN_ZOOM = 0.8
-const MAX_ZOOM = 1.5
 /** Clipboard text larger than this is refused (a pasted document, not a dump). */
 const MAX_CLIPBOARD_CHARS = 5 * 1024 * 1024
 
@@ -218,7 +216,7 @@ export function registerIpc(): void {
 
   ipcMain.handle('win:setZoom', (event, factor: unknown) => {
     if (typeof factor !== 'number' || !Number.isFinite(factor)) return
-    event.sender.setZoomFactor(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, factor)))
+    event.sender.setZoomFactor(clampZoom(factor))
   })
 
   ipcMain.handle('win:toggleFullScreen', (event) => {
