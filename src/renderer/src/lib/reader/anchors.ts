@@ -27,8 +27,17 @@ function lerp(from: number, to: number, t: number): number {
   return from + (to - from) * Math.min(1, Math.max(0, t))
 }
 
+/** When the document starts on line 0, its first block also owns the article's top
+ *  padding, so "line 0" means "scrolled to the very top" in both directions. */
+function padFirst(anchors: readonly Anchor[]): readonly Anchor[] {
+  const first = anchors[0]
+  if (!first || first.start !== 0 || first.top <= 0) return anchors
+  return [{ ...first, top: 0, height: first.top + first.height }, ...anchors.slice(1)]
+}
+
 /** The (fractional) source line at scroll offset `y`, or null without anchors. */
-export function lineAtOffset(anchors: readonly Anchor[], y: number): number | null {
+export function lineAtOffset(measured: readonly Anchor[], y: number): number | null {
+  const anchors = padFirst(measured)
   if (!anchors.length) return null
   const i = lastIndexWhere(anchors, (a) => a.top <= y)
   if (i < 0) {
@@ -44,7 +53,8 @@ export function lineAtOffset(anchors: readonly Anchor[], y: number): number | nu
 }
 
 /** The scroll offset that puts source line `line` at the top, or null without anchors. */
-export function offsetOfLine(anchors: readonly Anchor[], line: number): number | null {
+export function offsetOfLine(measured: readonly Anchor[], line: number): number | null {
+  const anchors = padFirst(measured)
   if (!anchors.length) return null
   const i = lastIndexWhere(anchors, (a) => a.start <= line)
   if (i < 0) {

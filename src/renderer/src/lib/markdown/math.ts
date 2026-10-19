@@ -77,15 +77,28 @@ export function renderMath(tex: string, displayMode: boolean, source: string): s
 interface MathToken extends Tokens.Generic {
   text: string
   display: boolean
+  /** Punctuation right after inline math ("$x$,"). It stays on the formula's line:
+   *  browsers may otherwise wrap before it, leaving a lone comma at a line start. */
+  trail?: string
 }
 
-function mathToken(type: string, raw: string, text: string, display: boolean): MathToken {
-  return { type, raw, text: text.trim(), display }
+function mathToken(type: string, raw: string, text: string, display: boolean, trail = ''): MathToken {
+  return { type, raw, text: text.trim(), display, trail }
 }
 
 function renderMathToken(token: Tokens.Generic): string {
   const t = token as MathToken
-  return renderMath(t.text, t.display, t.raw)
+  const source = t.trail ? t.raw.slice(0, -t.trail.length) : t.raw
+  const html = renderMath(t.text, t.display, source)
+  return t.trail ? '<span class="smd-math-nobr">' + html + escapeHtml(t.trail) + '</span>' : html
+}
+
+/** Closing punctuation that should stay on the same line as the formula before it. */
+const TRAIL = /^[.,;:?)\]”’]{1,3}/
+
+function withTrail(src: string, match: string): { raw: string; trail: string } {
+  const trail = TRAIL.exec(src.slice(match.length))?.[0] ?? ''
+  return { raw: match + trail, trail }
 }
 
 // A blank line ends any math (KaTeX can't use one and it bounds runaway matches).
@@ -162,7 +175,8 @@ const inlineMath: TokenizerAndRendererExtension = {
   tokenizer(src: string) {
     const m = /^\$(?![$\s])((?:\\\$|[^$])+?)(?<!\s)\$(?!\d)/.exec(src)
     if (!m || reachesIntoCode(m[1])) return undefined
-    return mathToken('inlineMath', m[0], m[1], false)
+    const { raw, trail } = withTrail(src, m[0])
+    return mathToken('inlineMath', raw, m[1], false, trail)
   },
   renderer: renderMathToken
 }
@@ -188,7 +202,8 @@ const parenMath: TokenizerAndRendererExtension = {
   tokenizer(src: string) {
     const m = PAREN.exec(src)
     if (!m || reachesIntoCode(m[1])) return undefined
-    return mathToken('parenMath', m[0], m[1], false)
+    const { raw, trail } = withTrail(src, m[0])
+    return mathToken('parenMath', raw, m[1], false, trail)
   },
   renderer: renderMathToken
 }

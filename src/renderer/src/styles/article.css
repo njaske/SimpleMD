@@ -400,6 +400,7 @@
 .smd-article .katex { font-size: 1.08em; text-rendering: auto; }
 .smd-article .katex-display { margin: 1.3em 0; overflow-x: auto; overflow-y: hidden; padding: 0.2em 0; }
 .smd-article .smd-math { margin: 1.3em 0; overflow-x: auto; overflow-y: hidden; }
+.smd-article .smd-math-nobr { white-space: nowrap; }
 .smd-article .smd-math > .katex-display { margin: 0; overflow: visible; }
 
 .smd-article .smd-mermaid { display: flex; margin: 1.9em 0; overflow-x: auto; overscroll-behavior-x: contain; }

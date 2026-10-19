@@ -145,6 +145,25 @@ describe('anchors', () => {
     }
     assert.equal(offsetOfLine(anchors, 50), 300)
   })
+
+  it('maps line 0 to the very top when the document starts with a block on line 0', () => {
+    // Arrange: the article's top padding puts the first block 36px down.
+    const fromTop = [
+      { top: 36, height: 64, start: 0, end: 4 },
+      { top: 140, height: 40, start: 5, end: 7 }
+    ]
+
+    // Act + Assert: line 0 is scroll 0 (not the block's top), and the mapping
+    // stays continuous and invertible across the padded block.
+    assert.equal(offsetOfLine(fromTop, 0), 0)
+    assert.equal(lineAtOffset(fromTop, 0), 0)
+    assert.equal(offsetOfLine(fromTop, 2), 50)
+    assert.equal(offsetOfLine(fromTop, 5), 140)
+    for (const y of [0, 20, 60, 120, 150]) {
+      const line = lineAtOffset(fromTop, y) ?? -1
+      assert.ok(Math.abs((offsetOfLine(fromTop, line) ?? -1) - y) < 1e-9, `round trip at ${y}`)
+    }
+  })
 })
 
 describe('progressive rendering plan', () => {

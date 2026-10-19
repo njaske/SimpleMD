@@ -44,6 +44,19 @@ describe('math delimiters', () => {
     assert.equal(displayCount(html), 0)
   })
 
+  it('keeps punctuation right after inline math on the same line', () => {
+    // Arrange
+    const md = raw`The ratio \(h\), then $x$. Also ($y$) and $5 for $10.`
+    // Act
+    const html = render(md)
+    // Assert: each trailing mark sits inside a no-wrap span with its formula,
+    // and prose dollars stay text.
+    assert.deepEqual(formulas(html), ['h', 'x', 'y'])
+    const glued = Array.from(parseHtml(html).querySelectorAll('.smd-math-nobr'), (el) => el.lastChild?.textContent)
+    assert.deepEqual(glued, [',', '.', ')'])
+    assert.ok(html.includes('$5 for $10.'))
+  })
+
   it('renders \\[ \\] display math on its own lines, even with list-like lines inside', () => {
     const md = raw`Before:
 \[

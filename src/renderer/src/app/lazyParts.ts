@@ -1,13 +1,15 @@
 // Everything the first paint of a document doesn't need loads on demand, keeping the
-// startup chunk small: the editor and its format bar, the find bar, the palette,
-// Settings, the Aa popover, dialogs, context menus, exports and the diff module.
-// prefetchLazyParts() warms them all while the app is idle, so first use is instant.
+// startup chunk small: the editor and its format bar, Settings, the Aa popover,
+// dialogs, context menus, exports and the diff module. prefetchLazyParts() warms them
+// all while the app is idle, so first use is instant. The palette and the find bar
+// are the exception: people press their shortcut and type at once, and keystrokes
+// typed while a chunk is still loading would be lost, so they ship in the startup chunk.
 import { lazy } from 'react'
+import CommandPaletteEager from '@/components/CommandPalette'
+import FindBarEager from '@/components/FindBar'
 
 const editor = () => import('@/components/CodeEditor')
 const formatBar = () => import('@/components/FormatBar')
-const findBar = () => import('@/components/FindBar')
-const palette = () => import('@/components/CommandPalette')
 const settings = () => import('@/components/SettingsDialog')
 const reading = () => import('@/components/ReadingPopover')
 const prompts = () => import('@/components/Prompts')
@@ -18,8 +20,8 @@ const menus = () => import('./menus')
 
 export const CodeEditor = lazy(editor)
 export const FormatBar = lazy(formatBar)
-export const FindBar = lazy(findBar)
-export const CommandPalette = lazy(palette)
+export const FindBar = FindBarEager
+export const CommandPalette = CommandPaletteEager
 export const SettingsDialog = lazy(settings)
 export const ReadingPopover = lazy(reading)
 export const RecoveryPrompt = lazy(recovery)
@@ -36,10 +38,8 @@ type Loader = () => Promise<unknown>
 
 /** In rough order of likely first use. */
 const WARM: readonly Loader[] = [
-  palette,
   contextMenu,
   menus,
-  findBar,
   reading,
   prompts,
   editor,
