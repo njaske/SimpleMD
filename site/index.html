@@ -3013,7 +3013,84 @@
       background: var(--surface-2);
       box-shadow: var(--window-shadow);
     }
-    .watch-video { display: block; width: 100%; height: 100%; object-fit: cover; }
+    .watch-video { display: block; width: 100%; height: 100%; object-fit: cover; background: #000; }
+    /* The site's own player. Without JS the browser's controls stay (the video keeps its
+       controls attribute until the script takes over). */
+    .watch-frame:fullscreen { max-width: none; border-radius: 0; aspect-ratio: auto; }
+    .watch-frame:fullscreen .watch-video { object-fit: contain; }
+    .wp-big, .wp-bar { display: none; }
+    .watch-frame.is-custom .wp-big { display: grid; }
+    .watch-frame.is-custom .wp-bar { display: flex; }
+    .watch-frame.is-custom .watch-video { cursor: pointer; }
+    .wp-big {
+      /* Below the poster's centred logo and tagline, not over them. */
+      position: absolute; left: 0; right: 0; top: 67%; margin: 0 auto;
+      width: 88px; height: 88px; place-items: center;
+      border: 0; border-radius: 50%; cursor: pointer;
+      background: var(--btn-primary-bg); color: #fff;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 0 8px rgba(255, 255, 255, 0.14);
+      transition: transform 260ms var(--ease-impeccable), opacity 220ms ease, background-color 160ms ease;
+    }
+    .wp-big:hover { transform: scale(1.06); background: var(--btn-primary-hover); }
+    .wp-big:active { transform: scale(0.97); }
+    .wp-big svg { width: 30px; height: 30px; margin-left: 4px; }
+    .watch-frame.is-playing .wp-big { opacity: 0; transform: scale(0.85); pointer-events: none; }
+    /* Once the film has started, the poster is gone: a paused button sits in the middle. */
+    .watch-frame.is-started .wp-big { top: calc(50% - 44px); }
+    .wp-bar {
+      position: absolute; left: 0; right: 0; bottom: 0;
+      align-items: center; gap: 6px; padding: 36px 14px 12px;
+      background: linear-gradient(to top, rgba(0, 0, 0, 0.62), rgba(0, 0, 0, 0));
+      color: #fff; font-family: var(--font-sans); font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      transition: opacity 260ms ease, transform 260ms var(--ease-impeccable);
+    }
+    .watch-frame:not(.is-started) .wp-bar,
+    .watch-frame.is-idle .wp-bar { opacity: 0; transform: translateY(6px); pointer-events: none; }
+    .watch-frame.is-idle { cursor: none; }
+    .wp-btn {
+      display: grid; place-items: center; flex: none;
+      width: 36px; height: 36px; border: 0; border-radius: 9px;
+      background: transparent; color: inherit; cursor: pointer;
+      transition: background-color 140ms ease;
+    }
+    .wp-btn:hover { background: rgba(255, 255, 255, 0.16); }
+    .wp-btn svg { width: 20px; height: 20px; }
+    .wp-btn .i-alt, .watch-frame.is-playing .wp-play .i-main,
+    .watch-frame.is-muted .wp-mute .i-main { display: none; }
+    .watch-frame.is-playing .wp-play .i-alt,
+    .watch-frame.is-muted .wp-mute .i-alt { display: block; }
+    .wp-time { flex: none; min-width: 84px; padding: 0 4px; opacity: 0.9; }
+    .wp-seek {
+      flex: 1; min-width: 0; height: 20px; margin: 0 6px; cursor: pointer;
+      -webkit-appearance: none; appearance: none; background: transparent;
+      --p: 0%;
+    }
+    .wp-seek::-webkit-slider-runnable-track {
+      height: 4px; border-radius: 4px;
+      background: linear-gradient(to right, var(--accent-red) var(--p), rgba(255, 255, 255, 0.3) var(--p));
+    }
+    .wp-seek::-moz-range-track { height: 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.3); }
+    .wp-seek::-moz-range-progress { height: 4px; border-radius: 4px; background: var(--accent-red); }
+    .wp-seek::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px;
+      border: 0; border-radius: 50%; background: #fff;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+      transform: scale(0); transition: transform 160ms var(--ease-impeccable);
+    }
+    .wp-seek::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: #fff; }
+    .wp-bar:hover .wp-seek::-webkit-slider-thumb, .wp-seek:focus-visible::-webkit-slider-thumb { transform: scale(1); }
+    .wp-btn:focus-visible, .wp-big:focus-visible, .wp-seek:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+    @media (max-width: 640px) {
+      .wp-big { width: 64px; height: 64px; }
+      .watch-frame.is-started .wp-big { top: calc(50% - 32px); }
+      .wp-big svg { width: 24px; height: 24px; }
+      .wp-bar { padding: 28px 8px 6px; gap: 2px; }
+      .wp-time { min-width: 0; font-size: 12px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .wp-big, .wp-bar, .wp-seek::-webkit-slider-thumb { transition: none; }
+    }
     @media (max-width: 640px) {
       .watch-section { padding: 88px 0 96px; }
       .watch-frame { border-radius: 12px; }
@@ -3330,10 +3407,29 @@
         </div>
         <div class="watch-frame">
           <video class="watch-video" controls playsinline preload="metadata" width="1920" height="1080"
+            controlslist="nodownload noplaybackrate" disablepictureinpicture disableremoteplayback
             poster="media/simplemd-promo-poster.jpg" aria-label="SimpleMD promo film, 47 seconds, with voice-over">
             <source src="media/simplemd-promo.mp4" type="video/mp4">
             <a href="media/simplemd-promo.mp4">Download the SimpleMD film (MP4, 9 MB)</a>
           </video>
+          <button class="wp-big" type="button" aria-label="Play the film">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5.6v12.8c0 .8.9 1.3 1.6.8l10-6.4c.6-.4.6-1.3 0-1.7l-10-6.4C8.9 4.3 8 4.8 8 5.6z"/></svg>
+          </button>
+          <div class="wp-bar">
+            <button class="wp-btn wp-play" type="button" aria-label="Play">
+              <svg class="i-main" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5.6v12.8c0 .8.9 1.3 1.6.8l10-6.4c.6-.4.6-1.3 0-1.7l-10-6.4C8.9 4.3 8 4.8 8 5.6z"/></svg>
+              <svg class="i-alt" viewBox="0 0 24 24" aria-hidden="true"><rect fill="currentColor" x="6" y="5" width="4" height="14" rx="1.2"/><rect fill="currentColor" x="14" y="5" width="4" height="14" rx="1.2"/></svg>
+            </button>
+            <span class="wp-time" aria-hidden="true">0:00 / 0:47</span>
+            <input class="wp-seek" type="range" min="0" max="1000" step="1" value="0" aria-label="Seek">
+            <button class="wp-btn wp-mute" type="button" aria-label="Mute">
+              <svg class="i-main" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 9.5v5c0 .6.4 1 1 1h3l4.3 3.6c.7.5 1.7.1 1.7-.8V5.7c0-.9-1-1.3-1.7-.8L8 8.5H5c-.6 0-1 .4-1 1z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M17 9a4.2 4.2 0 0 1 0 6M19.4 6.6a7.6 7.6 0 0 1 0 10.8"/></svg>
+              <svg class="i-alt" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 9.5v5c0 .6.4 1 1 1h3l4.3 3.6c.7.5 1.7.1 1.7-.8V5.7c0-.9-1-1.3-1.7-.8L8 8.5H5c-.6 0-1 .4-1 1z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M17 9.5l5 5M22 9.5l-5 5"/></svg>
+            </button>
+            <button class="wp-btn wp-full" type="button" aria-label="Full screen">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4"/></svg>
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -4087,6 +4183,97 @@ graph LR
          Real KaTeX for the static formulas (the HTML fallback stays if the
          KaTeX CDN is unavailable)
          ------------------------------------------------------------------------ */
+      /* ------------------------------------------------------------------------
+         The film's player: the site's own controls in place of the browser's
+         ------------------------------------------------------------------------ */
+      (function () {
+        var frame = document.querySelector(".watch-frame");
+        var video = frame && frame.querySelector("video");
+        if (!video) return;
+        var big = frame.querySelector(".wp-big");
+        var play = frame.querySelector(".wp-play");
+        var mute = frame.querySelector(".wp-mute");
+        var full = frame.querySelector(".wp-full");
+        var seek = frame.querySelector(".wp-seek");
+        var time = frame.querySelector(".wp-time");
+        var IDLE_MS = 2200;
+        var idleTimer = 0;
+        var seeking = false;
+
+        video.removeAttribute("controls");
+        frame.classList.add("is-custom");
+
+        function clock(t) {
+          t = Math.max(0, Math.floor(t || 0));
+          return Math.floor(t / 60) + ":" + String(t % 60).padStart(2, "0");
+        }
+        function render() {
+          var d = video.duration || 0;
+          if (!seeking) seek.value = String(Math.round(d ? (video.currentTime / d) * 1000 : 0));
+          seek.style.setProperty("--p", (seek.value / 10) + "%");
+          seek.setAttribute("aria-valuetext", clock(video.currentTime) + " of " + clock(d));
+          time.textContent = clock(video.currentTime) + " / " + clock(d || 47);
+        }
+        function toggle() {
+          if (video.paused || video.ended) video.play().catch(function () {});
+          else video.pause();
+        }
+        function wake() {
+          frame.classList.remove("is-idle");
+          clearTimeout(idleTimer);
+          if (!video.paused) idleTimer = setTimeout(function () { frame.classList.add("is-idle"); }, IDLE_MS);
+        }
+
+        video.addEventListener("play", function () {
+          frame.classList.add("is-playing", "is-started");
+          play.setAttribute("aria-label", "Pause");
+          wake();
+        });
+        video.addEventListener("pause", function () {
+          frame.classList.remove("is-playing");
+          play.setAttribute("aria-label", "Play");
+          wake();
+        });
+        video.addEventListener("ended", function () { frame.classList.remove("is-started"); });
+        video.addEventListener("volumechange", function () {
+          frame.classList.toggle("is-muted", video.muted);
+          mute.setAttribute("aria-label", video.muted ? "Unmute" : "Mute");
+        });
+        ["timeupdate", "loadedmetadata", "seeked"].forEach(function (e) { video.addEventListener(e, render); });
+
+        big.addEventListener("click", toggle);
+        play.addEventListener("click", toggle);
+        video.addEventListener("click", toggle);
+        video.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+        mute.addEventListener("click", function () { video.muted = !video.muted; });
+        full.addEventListener("click", function () {
+          if (document.fullscreenElement) document.exitFullscreen();
+          else if (frame.requestFullscreen) frame.requestFullscreen().catch(function () {});
+          else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+        });
+        seek.addEventListener("input", function () {
+          seeking = true;
+          if (video.duration) video.currentTime = (seek.value / 1000) * video.duration;
+          render();
+        });
+        seek.addEventListener("change", function () { seeking = false; });
+
+        frame.addEventListener("pointermove", wake);
+        frame.addEventListener("focusin", wake);
+        frame.addEventListener("keydown", function (e) {
+          var k = e.key.toLowerCase();
+          if (e.target === seek && (k === "arrowleft" || k === "arrowright")) return;
+          if (k === "k" || (k === " " && e.target.tagName !== "BUTTON")) { e.preventDefault(); toggle(); }
+          else if (k === "m") video.muted = !video.muted;
+          else if (k === "f") full.click();
+          else if (k === "arrowleft") video.currentTime = Math.max(0, video.currentTime - 5);
+          else if (k === "arrowright") video.currentTime = Math.min(video.duration || 0, video.currentTime + 5);
+          else return;
+          wake();
+        });
+        render();
+      })();
+
       if (window.katex) {
         document.querySelectorAll("[data-tex]").forEach(function (el) {
           try {
