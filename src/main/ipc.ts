@@ -1,7 +1,7 @@
 import { BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import { dirname } from 'path'
-import { isApproved, isApprovedRoot } from './access'
-import { readImageDataUrl, readMdFile, readMdFiles, resolveDrop, saveMdFile, scanFolder } from './fs-md'
+import { isApproved, isApprovedFile, isApprovedRoot } from './access'
+import { isMarkdownFile, readImageDataUrl, readMdFile, readMdFiles, resolveDrop, saveMdFile, scanFolder } from './fs-md'
 import { forgetPath, grantFiles, grantRoot } from './grants'
 import { registerWorkspaceIpc } from './ipc-workspace'
 import { loadSettings, saveSettings } from './settings'
@@ -66,6 +66,13 @@ export async function openFromSecondInstance(
   }
   if (result.folder) watchFolder(result.folder.root, win.webContents)
   win.webContents.send('app:open-paths', result)
+}
+
+/** A file the document IPC may read or write: a Markdown file inside an opened folder,
+ *  or a file the user opened individually. Anything else in a workspace (git hooks,
+ *  scripts, .env, editor settings) stays out of reach even of a compromised page. */
+function isDocumentPath(path: unknown): path is string {
+  return isApprovedFile(path) || (isApproved(path) && isMarkdownFile(path))
 }
 
 function denied(): never {
@@ -135,12 +142,12 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle('fs:readFile', (_event, path: unknown) => {
-    if (!isApproved(path)) denied()
+    if (!isDocumentPath(path)) denied()
     return readMdFile(path)
   })
 
   ipcMain.handle('fs:saveFile', async (_event, path: unknown, content: string) => {
-    if (!isApproved(path)) denied()
+    if (!isDocumentPath(path)) denied()
     await saveMdFile(path, content)
     return true
   })
@@ -173,7 +180,8 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle('shell:trashItem', async (_event, path: unknown) => {
-    if (!isApproved(path)) return false
+    // The open workspace itself is never trashed from the app, only what's inside it.
+    if (!isApproved(path) || isApprovedRoot(path)) return false
     try {
       await shell.trashItem(path)
       await forgetPath(path)

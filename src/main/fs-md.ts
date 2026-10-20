@@ -284,6 +284,10 @@ export const UNSAFE_SAVE_EXTENSIONS: ReadonlySet<string> = new Set([
 export function assertSafeSavePath(path: unknown): asserts path is string {
   if (typeof path !== 'string' || path.length === 0) throw new Error('Invalid path')
   if (!isAbsolute(path)) throw new Error('Path must be absolute')
+  // Windows drops trailing dots and spaces ("run.bat." is run.bat) and ":" opens an
+  // alternate data stream, so either would slip past the extension check below.
+  const name = basename(path)
+  if (/[.\s]$/.test(name) || name.includes(':')) throw new Error('Invalid file name')
   if (UNSAFE_SAVE_EXTENSIONS.has(extname(path).toLowerCase())) throw new Error('Refusing to write this file type')
 }
 

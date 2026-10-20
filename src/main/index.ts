@@ -1,6 +1,7 @@
-import { app, BrowserWindow, Menu, nativeTheme, session, shell } from 'electron'
+import { app, BrowserWindow, Menu, nativeTheme, net, protocol, session, shell } from 'electron'
 import { mkdirSync } from 'fs'
 import { join, resolve } from 'path'
+import { isBundledFileUrl } from './file-guard'
 import { openFromSecondInstance, prepareLaunch, registerIpc, restoreAccess } from './ipc'
 import { extractLaunchPaths } from './launch'
 import {
@@ -13,7 +14,9 @@ import {
 } from './platform'
 import { loadSettings, saveSettings, settingsWritten } from './settings'
 
-const RENDERER_DEV_URL = process.env['ELECTRON_RENDERER_URL']
+// Development-only hooks are ignored in a packaged build, so the environment a
+// release is started from can't swap its page or its CSP.
+const RENDERER_DEV_URL = app.isPackaged ? undefined : process.env['ELECTRON_RENDERER_URL']
 const isDev = !!RENDERER_DEV_URL
 const isMac = process.platform === 'darwin'
 
@@ -58,6 +61,15 @@ function applyContentSecurityPolicy(): void {
         'Content-Security-Policy': [policy]
       }
     })
+  })
+}
+
+/** Serve file:// only from the app's own renderer bundle (see file-guard.ts). */
+function confineFileProtocol(): void {
+  const bundleDir = join(__dirname, '../renderer')
+  protocol.handle('file', (request) => {
+    if (!isBundledFileUrl(request.url, bundleDir)) return new Response(null, { status: 403 })
+    return net.fetch(request, { bypassCustomProtocolHandlers: true })
   })
 }
 
@@ -256,12 +268,13 @@ if (!gotLock) {
   app.whenReady().then(async () => {
     app.setAppUserModelId('com.simplemd.app')
     installMenu()
-    // Optional: open a specific folder on launch (also used for first-run defaults).
-    const initialFolder = process.env['SIMPLEMD_INITIAL_FOLDER']
+    // Development and tests only: open a specific folder on launch.
+    const initialFolder = app.isPackaged ? undefined : process.env['SIMPLEMD_INITIAL_FOLDER']
     if (initialFolder) await saveSettings({ lastFolder: initialFolder })
     await restoreAccess()
     const launchArgs = app.isPackaged ? process.argv.slice(1) : []
     await prepareLaunch([...launchArgs, ...earlyOpenFiles.splice(0)], process.cwd())
+    confineFileProtocol()
     applyContentSecurityPolicy()
     denyPermissionRequests()
     configureSpellcheck()

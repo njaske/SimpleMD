@@ -6,8 +6,9 @@
 // well, in case some other syntax slipped a reference through.
 
 const URL_BODY = String.raw`(?:https?:)?\/\/[^\s"'<>(),}]*`
-/** `img: "https://…"` (quoted or not) inside a node's `@{ … }` metadata. */
-const IMG_KEY = new RegExp(String.raw`(@\{[^}]*?\bimg\s*:\s*)(["']?)${URL_BODY}\2`, 'gi')
+/** `img: "https://…"` inside a node's `@{ … }` metadata; the key and the value may be
+ *  quoted ("img": …) and the URL padded with spaces. */
+const IMG_KEY = new RegExp(String.raw`(@\{[^}]*?["']?\bimg["']?\s*:\s*)(["']?)\s*${URL_BODY}\s*\2`, 'gi')
 /** An HTML <img>/<image> tag in a label that points at the web. */
 const IMG_TAG = new RegExp(String.raw`<(?:img|image)\b[^>]*?\b(?:src|srcset|href)\s*=\s*(["']?)${URL_BODY}[^>]*>`, 'gi')
 /** url(…), image-set(…) and @import in a style, classDef or label. */

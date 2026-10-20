@@ -72,12 +72,25 @@ function moveLineAttrs(from: HTMLElement, to: HTMLElement): void {
   }
 }
 
+/** Code is plain text. Raw HTML inside a block (a span styled to be invisible, say)
+ *  could hide part of a command from the reader while Copy still copies it, so a block
+ *  keeps only its text and shows every character it will copy. */
+function flattenToText(el: HTMLElement): void {
+  if (el.firstElementChild) el.textContent = el.textContent ?? ''
+}
+
 /** Highlight and decorate every code block under `root`. */
 export function decorateCodeBlocks(root: ParentNode): void {
   root.querySelectorAll<HTMLElement>('pre').forEach((pre) => {
     if (pre.parentElement?.classList.contains('smd-code')) return
     const code = pre.querySelector<HTMLElement>(':scope > code')
-    if (code) highlightCode(code)
+    flattenToText(code ?? pre)
+    if (code) {
+      Array.from(pre.childNodes).forEach((node) => {
+        if (node !== code) node.remove()
+      })
+      highlightCode(code)
+    }
     const lang = languageOf(code)
     const wrap = document.createElement('div')
     wrap.className = 'smd-code'

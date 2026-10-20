@@ -24,6 +24,13 @@ const MAX_TITLE = 1000
 const OPEN = /^---[ \t]*$/
 const CLOSE = /^(?:---|\.\.\.)[ \t]*$/
 const KEY_LINE = /^([^\s#:-][^:]*?|-[^\s:][^:]*?)[ \t]*:(?:[ \t]+(.*))?$/
+/** Longer lines are never keys: KEY_LINE backtracks quadratically on a long run of
+ *  spaces, and real front-matter keys are short. */
+const MAX_KEY_LINE = 2000
+
+function keyLine(line: string): RegExpExecArray | null {
+  return line.length > MAX_KEY_LINE ? null : KEY_LINE.exec(line)
+}
 const LIST_ITEM = /^[ \t]*-(?:[ \t]+(.*))?$/
 
 /** The front matter at the very start of `lines`, or null when there is none (or the
@@ -51,15 +58,15 @@ function isSkippable(line: string): boolean {
 function looksLikeYaml(body: readonly string[]): boolean {
   const meaningful = body.filter((line) => !isSkippable(line))
   if (!meaningful.length) return true
-  if (!KEY_LINE.test(meaningful[0])) return false
-  return meaningful.every((line) => KEY_LINE.test(line) || /^[ \t]+\S/.test(line) || LIST_ITEM.test(line))
+  if (!keyLine(meaningful[0])) return false
+  return meaningful.every((line) => keyLine(line) !== null || /^[ \t]+\S/.test(line) || LIST_ITEM.test(line))
 }
 
 function parseEntries(body: readonly string[]): FrontMatterEntry[] {
   const entries: FrontMatterEntry[] = []
   let i = 0
   while (i < body.length && entries.length < MAX_ENTRIES) {
-    const m = isSkippable(body[i]) ? null : KEY_LINE.exec(body[i])
+    const m = isSkippable(body[i]) ? null : keyLine(body[i])
     i++
     if (!m) continue
     const nested: string[] = []
