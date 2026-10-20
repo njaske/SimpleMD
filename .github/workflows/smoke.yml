@@ -10,8 +10,10 @@ on:
         description: Release tag to test (e.g. v1.1.0)
         required: true
 
+# Write is only so the token can see draft releases (GitHub hides drafts from read-only
+# tokens); nothing here uploads or edits anything.
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   linux:
