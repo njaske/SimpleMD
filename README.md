@@ -25,6 +25,10 @@ And your files never leave your machine.
 
 <sub><a href="https://njaske.github.io/SimpleMD/#watch">Watch the film</a> · <a href="site/media/simplemd-promo.mp4">download the MP4</a></sub>
 
+
+https://github.com/user-attachments/assets/02a71b69-d514-4261-a893-f26fdf6c8c65
+
+
 <br><br>
 
 <img src="site/screenshots/math-code-dark.png" alt="SimpleMD reading an AI-generated design doc with a typeset equation, highlighted TypeScript and a live outline" width="100%">
