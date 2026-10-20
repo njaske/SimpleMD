@@ -2998,6 +2998,26 @@
         display: none !important;
       }
     }
+    .watch-section {
+      padding: 120px 0 128px;
+      border-top: 1px solid var(--border-hairline);
+    }
+    .watch-section .section-header { margin-bottom: 48px; }
+    .watch-frame {
+      position: relative;
+      max-width: 1100px;
+      margin: 0 auto;
+      aspect-ratio: 16 / 9;
+      border-radius: 16px;
+      overflow: hidden;
+      background: var(--surface-2);
+      box-shadow: var(--window-shadow);
+    }
+    .watch-video { display: block; width: 100%; height: 100%; object-fit: cover; }
+    @media (max-width: 640px) {
+      .watch-section { padding: 88px 0 96px; }
+      .watch-frame { border-radius: 12px; }
+    }
   </style>
 </head>
 <body>
@@ -3025,6 +3045,7 @@
         </a>
 
         <ul class="nav-links">
+          <li class="nav-link-item"><a href="#watch">Video</a></li>
           <li class="nav-link-item"><a href="#problem">The Problem</a></li>
           <li class="nav-link-item"><a href="#demo">Demo</a></li>
           <li class="nav-link-item"><a href="#screenshots">Screenshots</a></li>
@@ -3299,6 +3320,25 @@
     </section>
 
 <!-- ======================================================================
+         THE FILM (#watch): 47 seconds, voice-over, the app's own design
+         ====================================================================== -->
+    <section class="watch-section" id="watch">
+      <div class="container">
+        <div class="section-header">
+          <h2 class="section-title">See it in <em>47 seconds.</em></h2>
+          <p class="section-desc measure">Paste an answer, watch the math, diagrams and code render, follow what a coding agent changed, and switch between reading and editing.</p>
+        </div>
+        <div class="watch-frame">
+          <video class="watch-video" controls playsinline preload="metadata" width="1920" height="1080"
+            poster="media/simplemd-promo-poster.jpg" aria-label="SimpleMD promo film, 47 seconds, with voice-over">
+            <source src="media/simplemd-promo.mp4" type="video/mp4">
+            <a href="media/simplemd-promo.mp4">Download the SimpleMD film (MP4, 9 MB)</a>
+          </video>
+        </div>
+      </div>
+    </section>
+
+<!-- ======================================================================
          SECTION 3: THE PROBLEM IT SOLVES (#problem)
          Interactive Draggable Split Comparison: Raw Fences vs SimpleMD
          ====================================================================== -->
@@ -3517,7 +3557,7 @@ graph LR
         <div class="section-header">
           <h2 class="section-title">The real app. <em>Not</em> a mockup.</h2>
           <p class="section-desc measure">
-            Every frame is SimpleMD 1.0.3 running on Windows, opening the kind of Markdown an AI assistant hands you. Flip the site theme and the app follows.
+            Every frame is SimpleMD 1.1 running on Windows, opening the kind of Markdown an AI assistant hands you. Flip the site theme and the app follows.
           </p>
         </div>
 
