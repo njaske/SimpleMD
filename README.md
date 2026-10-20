@@ -15,8 +15,8 @@ And your files never leave your machine.
 
 [![CI](https://github.com/njaske/SimpleMD/actions/workflows/ci.yml/badge.svg)](https://github.com/njaske/SimpleMD/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/njaske/SimpleMD?color=D32F2F)](https://github.com/njaske/SimpleMD/releases/latest)
-[![VirusTotal Setup](https://img.shields.io/badge/VirusTotal%20(Setup)-0%2F53-2EA44F?logo=virustotal&logoColor=white)](https://www.virustotal.com/gui/file/e58e5226030e3d9e940bee1af65a4d455f619c724aba56c4a73f2a6fac096dff)
-[![VirusTotal Portable](https://img.shields.io/badge/VirusTotal%20(Portable)-0%2F57-2EA44F?logo=virustotal&logoColor=white)](https://www.virustotal.com/gui/file/5125c941df2de04d39e299161cc1dbe941f380234616541fbe1e52da86bf4fef)
+[![VirusTotal Setup](https://img.shields.io/badge/VirusTotal%20(Setup)-0%2F66-2EA44F?logo=virustotal&logoColor=white)](https://www.virustotal.com/gui/file/0341bfcdad23c339ceb3673897a5ac1cc24ce42972aaf15cd72bf0c9b447abcd)
+[![VirusTotal Portable](https://img.shields.io/badge/VirusTotal%20(Portable)-0%2F66-2EA44F?logo=virustotal&logoColor=white)](https://www.virustotal.com/gui/file/4213d0606470a5ee208d582a61a7e8ee992334b0be5c15ae676b026b549386ab)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 <br>
@@ -111,26 +111,12 @@ Grab the [latest release](https://github.com/njaske/SimpleMD/releases/latest). W
 
 ### Scanned clean
 
-Every release is uploaded to VirusTotal. For **v1.0.3**, not one antivirus engine flagged either file.
+Every release is uploaded to VirusTotal. For **v1.1.0**, not one of 66 antivirus engines flagged either file.
 
 | File | Result | SHA-256 |
 |---|---|---|
-| `SimpleMD-Setup.exe` | [**0 / 53 detections**](https://www.virustotal.com/gui/file/e58e5226030e3d9e940bee1af65a4d455f619c724aba56c4a73f2a6fac096dff) | `e58e5226030e3d9e940bee1af65a4d455f619c724aba56c4a73f2a6fac096dff` |
-| `SimpleMD-portable.exe` | [**0 / 57 detections**](https://www.virustotal.com/gui/file/5125c941df2de04d39e299161cc1dbe941f380234616541fbe1e52da86bf4fef) | `5125c941df2de04d39e299161cc1dbe941f380234616541fbe1e52da86bf4fef` |
-
-<details>
-<summary><b>Show the VirusTotal reports</b></summary>
-<br>
-
-**SimpleMD-Setup.exe**
-
-<a href="https://www.virustotal.com/gui/file/e58e5226030e3d9e940bee1af65a4d455f619c724aba56c4a73f2a6fac096dff"><img src="docs/virustotal-setup.png" alt="VirusTotal report for SimpleMD-Setup.exe: no security vendors flagged this file, 0 of 53"></a>
-
-**SimpleMD-portable.exe**
-
-<a href="https://www.virustotal.com/gui/file/5125c941df2de04d39e299161cc1dbe941f380234616541fbe1e52da86bf4fef"><img src="docs/virustotal-portable.png" alt="VirusTotal report for SimpleMD-portable.exe: no security vendors flagged this file, 0 of 57"></a>
-
-</details>
+| `SimpleMD-Setup.exe` | [**0 / 66 detections**](https://www.virustotal.com/gui/file/0341bfcdad23c339ceb3673897a5ac1cc24ce42972aaf15cd72bf0c9b447abcd) | `0341bfcdad23c339ceb3673897a5ac1cc24ce42972aaf15cd72bf0c9b447abcd` |
+| `SimpleMD-portable.exe` | [**0 / 66 detections**](https://www.virustotal.com/gui/file/4213d0606470a5ee208d582a61a7e8ee992334b0be5c15ae676b026b549386ab) | `4213d0606470a5ee208d582a61a7e8ee992334b0be5c15ae676b026b549386ab` |
 
 To check that your download is the exact file that was scanned, compare its hash with the table above:
 
