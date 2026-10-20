@@ -1,0 +1,84 @@
+name: Smoke test release
+
+# Launches the actual release files on real Linux and macOS runners, opens a document,
+# and uploads a screenshot of each, so a release can be checked without owning those
+# machines. Run it on a draft before publishing: Actions > Smoke test release > Run.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to test (e.g. v1.1.0)
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download the Linux packages from the release
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.AppImage' --pattern '*.deb' --dir pkg
+      - name: Install a virtual display
+        run: sudo apt-get update && sudo apt-get install -y xvfb imagemagick
+      - name: The .deb installs and puts the app and its launcher in place
+        run: |
+          sudo apt-get install -y ./pkg/*.deb
+          dpkg -L simplemd | grep -E '\.desktop$|/simplemd$' | tee installed.txt
+          test -s installed.txt
+      - name: The AppImage starts, opens a document and stays up
+        run: |
+          chmod +x pkg/*.AppImage
+          (cd pkg && ./*.AppImage --appimage-extract > /dev/null)
+          Xvfb :99 -screen 0 1440x900x24 &
+          sleep 2
+          export DISPLAY=:99
+          ./pkg/squashfs-root/AppRun --no-sandbox "$PWD/sample-notes/AI Answers/Rate Limiter Design.md" > app.log 2>&1 &
+          APP=$!
+          sleep 20
+          kill -0 "$APP" || { echo "::error::the app exited"; cat app.log; exit 1; }
+          import -window root linux.png
+          kill "$APP" || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: linux
+          path: |
+            linux.png
+            app.log
+            installed.txt
+
+  macos:
+    runs-on: macos-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download the Apple Silicon build from the release
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*-mac-arm64.zip' --dir pkg
+      - name: Unpack and verify the signature
+        run: |
+          ditto -x -k pkg/*-mac-arm64.zip pkg
+          codesign --verify --deep --strict --verbose=2 pkg/*.app
+      - name: The app starts, opens a document and stays up
+        run: |
+          APPDIR=$(ls -d pkg/*.app)
+          BIN="$APPDIR/Contents/MacOS/$(defaults read "$PWD/$APPDIR/Contents/Info" CFBundleExecutable)"
+          "$BIN" "$PWD/sample-notes/AI Answers/Rate Limiter Design.md" > app.log 2>&1 &
+          APP=$!
+          sleep 25
+          kill -0 "$APP" || { echo "::error::the app exited"; cat app.log; exit 1; }
+          screencapture -x macos.png
+          kill "$APP" || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: macos
+          path: |
+            macos.png
+            app.log
