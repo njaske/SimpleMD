@@ -208,3 +208,43 @@ test('a compromised page still cannot reach files outside what was opened', asyn
   expect(probe.readMarkdown.ok).toBe(true)
   expect(await readFile(join(notes, '.git', 'hooks', 'pre-commit'), 'utf8')).toBe('#!/bin/sh\n')
 })
+
+test('split view: the editor follows the reader smoothly, without stepping back', async () => {
+  const body = Array.from({ length: 160 }, (_, i) =>
+    i % 8 === 0 ? `## Section ${i / 8 + 1}` : `Paragraph ${i}: synced scrolling should keep both panes on the same text while the reader scrolls smoothly.`
+  ).join('\n\n')
+  run = await launch({ notes: await makeNotes({ 'Long.md': `# Long\n\n${body}\n` }) })
+  await openFile('Long.md')
+  await run.page.keyboard.press('Control+2')
+  await expect(run.page.locator('.cm-content')).toBeVisible()
+  await run.page.waitForTimeout(600)
+  // Scroll the reader smoothly and sample where the editor is on every frame.
+  const samples: number[] = await run.page.evaluate(
+    () =>
+      new Promise<number[]>((done) => {
+        const reader = document.querySelector('.smd-reader') as HTMLElement
+        const editor = document.querySelector('.cm-scroller') as HTMLElement
+        const out: number[] = []
+        const start = performance.now()
+        const step = (t: number): void => {
+          const k = Math.min(1, (t - start) / 1500)
+          reader.scrollTop = k * 2400
+          out.push(editor.scrollTop)
+          if (k < 1) requestAnimationFrame(step)
+          else setTimeout(() => done(out), 300)
+        }
+        requestAnimationFrame(step)
+      })
+  )
+  // While the reader glides (~27 px a frame) the editor should glide too: no backwards steps,
+  // and no stair-stepping where it sits still for frames and then jumps whole lines at once.
+  const steps = samples.slice(1).map((v, i) => v - samples[i])
+  const moving = steps.slice(5, -20)
+  const reversals = moving.filter((d) => d < -1).length
+  const still = moving.filter((d) => Math.abs(d) < 0.5).length
+  const biggest = Math.max(...moving)
+  expect(samples.at(-1)!).toBeGreaterThan(500)
+  expect(reversals).toBe(0)
+  expect(still / moving.length).toBeLessThan(0.15)
+  expect(biggest).toBeLessThan(60)
+})

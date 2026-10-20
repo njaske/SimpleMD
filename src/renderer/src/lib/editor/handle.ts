@@ -55,6 +55,15 @@ export function createEditorHandle(view: EditorView): EditorHandleController {
     const fraction = Math.min(Math.max(line - index, 0), 1)
     const current = ++generation
     quietUntil = performance.now() + QUIET_MS
+    // Following a continuous scroll, the line is already laid out: go to the exact pixel in one
+    // step. (The two-step path below gets cancelled by the next frame's scroll before its
+    // fine-tune runs, so the editor would only move in whole-line jumps beside a gliding reader.)
+    const { viewport } = view
+    if (from >= viewport.from && from <= viewport.to) {
+      const block = view.lineBlockAt(from)
+      view.scrollDOM.scrollTop = docOffset(view) + block.top + fraction * block.height
+      return
+    }
     view.dispatch({ effects: EditorView.scrollIntoView(from, { y: 'start' }) })
     requestAnimationFrame(() => {
       if (current === generation && view.dom.isConnected) view.requestMeasure(fineTune(from, fraction, current))
