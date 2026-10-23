@@ -152,9 +152,9 @@ export default function DocumentView(p: DocumentViewProps) {
       <div className="smd-docarea">
         {p.conflict && <ConflictBar onReload={p.onReloadConflict} onKeep={p.onKeepMine} />}
         <div className={'smd-panes' + (p.viewMode === 'split' ? ' smd-panes--split' : '')}>
-          {/* Reader left, editor right: the same order as the Read · Split · Edit switch. */}
-          {p.viewMode !== 'edit' ? <ReaderPane {...p} /> : null}
+          {/* Editor left, reader right: the same order as the Edit · Split · Read switch. */}
           {p.viewMode !== 'read' ? <EditorPane {...p} /> : null}
+          {p.viewMode !== 'edit' ? <ReaderPane {...p} /> : null}
         </div>
       </div>
       {p.outline}

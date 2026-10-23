@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Split view puts the editor back on the left and the preview on the right, and the view switch now reads Edit · Split · Read to match. The shortcuts keep their numbers: Ctrl+1 Read, Ctrl+2 Split, Ctrl+3 Edit.
 - Optional update checks. SimpleMD asks once whether to check for new versions; nothing goes online unless you say yes. When on, it asks GitHub for the latest version number about once a day. A new version shows a notice in the corner and a dot on the Settings gear, and Download opens the release page (nothing installs on its own). "Check for updates" is also in the command palette and Settings → About.
 
 ## 1.1.1

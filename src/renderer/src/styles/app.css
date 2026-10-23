@@ -13,7 +13,7 @@
 .smd-docarea { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .smd-panes { flex: 1; display: flex; min-width: 0; min-height: 0; }
 .smd-editor-pane { flex: none; width: 100%; height: 100%; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
-.smd-panes--split .smd-editor-pane { width: 50%; border-left: 1px solid var(--border); }
+.smd-panes--split .smd-editor-pane { width: 50%; border-right: 1px solid var(--border); }
 .smd-editor-pane > .smd-editor-host { flex: 1; min-height: 0; }
 /* The reader scroller lives in a positioned pane so the find bar can float over it; the
    change bar sits above it in the flow. */

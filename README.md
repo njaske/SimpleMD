@@ -50,8 +50,8 @@ SimpleMD renders all of it the way it was meant to look, in a fast desktop app t
       <b>Diagrams and tables.</b> Mermaid flowcharts, sequence diagrams, tables with inline math and task lists, all rendered inline.
     </td>
     <td width="50%" valign="top">
-      <img src="site/screenshots/split-dark.png" alt="Split view with the rendered preview on the left and the Markdown source on the right"><br>
-      <b>Split view.</b> The preview on the left, the source on the right, scrolling together. Edit and watch it follow as you type. Ctrl+S saves.
+      <img src="site/screenshots/split-dark.png" alt="Split view with the Markdown source on the left and the rendered preview on the right"><br>
+      <b>Split view.</b> The source on the left, the preview on the right, scrolling together. Edit and watch it follow as you type. Ctrl+S saves.
     </td>
   </tr>
   <tr>

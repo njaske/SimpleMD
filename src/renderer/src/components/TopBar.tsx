@@ -36,10 +36,12 @@ export interface TopBarProps {
   onDocMenu: (anchor: HTMLElement, keyboard: boolean) => void
 }
 
+// Left to right as Split view lays them out: the source, both, the rendered page. The
+// shortcuts keep their numbers (Mod+1 is still Read).
 const MODES: { mode: ViewMode; label: string; shortcut: string }[] = [
-  { mode: 'read', label: 'Read', shortcut: 'Mod+1' },
+  { mode: 'edit', label: 'Edit', shortcut: 'Mod+3' },
   { mode: 'split', label: 'Split', shortcut: 'Mod+2' },
-  { mode: 'edit', label: 'Edit', shortcut: 'Mod+3' }
+  { mode: 'read', label: 'Read', shortcut: 'Mod+1' }
 ]
 
 export default function TopBar(p: TopBarProps) {

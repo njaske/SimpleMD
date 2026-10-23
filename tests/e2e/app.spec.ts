@@ -303,7 +303,7 @@ test('split view: both panes move in the same frame under the mouse wheel, eithe
   expect(fromEditor.stalled).toBe(0)
 })
 
-test('split view shows the reader on the left and the editor on the right, like the switch', async () => {
+test('split view shows the editor on the left and the reader on the right, like the switch', async () => {
   run = await launch({ notes: await makeNotes(NOTES) })
   await openFile('Answer.md')
   await run.page.keyboard.press('Control+2')
@@ -311,9 +311,10 @@ test('split view shows the reader on the left and the editor on the right, like 
 
   const reader = (await run.page.locator('.smd-reader-pane').boundingBox())!
   const editor = (await run.page.locator('.smd-editor-pane').boundingBox())!
-  expect(reader.x).toBeLessThan(editor.x)
+  expect(editor.x).toBeLessThan(reader.x)
   const switchX = async (name: string) => (await run.page.getByRole('radio', { name, exact: true }).boundingBox())!.x
-  expect(await switchX('Read')).toBeLessThan(await switchX('Edit'))
+  expect(await switchX('Edit')).toBeLessThan(await switchX('Split'))
+  expect(await switchX('Split')).toBeLessThan(await switchX('Read'))
 })
 
 test('the sidebar opens a file and a folder with buttons', async () => {
