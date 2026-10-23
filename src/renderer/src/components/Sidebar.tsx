@@ -2,7 +2,7 @@ import { memo } from 'react'
 import type { Activity, ResolvedTheme } from '@shared/types'
 import type { NamedFileRef } from '@/state/viewmodel'
 import type { SearchResult } from '@/lib/document'
-import { AppMark, ContrastIcon, GearIcon, KeyboardIcon, PlusIcon, SearchIcon } from '@/lib/icons'
+import { AppMark, ContrastIcon, FileTextIcon, FolderOpenIcon, GearIcon, KeyboardIcon, PlusIcon, SearchIcon } from '@/lib/icons'
 import FileTree, { type FileTreeProps } from './FileTree'
 import SearchPanel from './SearchPanel'
 import PinnedPanel from './PinnedPanel'
@@ -17,6 +17,8 @@ export interface SidebarProps {
   /** `focusField`: a click on Search, which puts the cursor in its field. */
   onActivity: (a: Activity, focusField?: boolean) => void
   onNewDocument: () => void
+  onOpenFile: () => void
+  onOpenFolder: () => void
   onQuickOpen: () => void
   onSettings: () => void
   onToggleTheme: () => void
@@ -56,6 +58,24 @@ function Sidebar(p: SidebarProps) {
           title={`New document (${p.hint('Mod+N')})`}
         >
           <PlusIcon size={17} />
+        </button>
+        <button
+          type="button"
+          className="smd-iconbtn"
+          onClick={p.onOpenFile}
+          aria-label="Open file"
+          title={`Open file (${p.hint('Mod+O')})`}
+        >
+          <FileTextIcon size={16} />
+        </button>
+        <button
+          type="button"
+          className="smd-iconbtn"
+          onClick={p.onOpenFolder}
+          aria-label="Open folder"
+          title={`Open folder (${p.hint('Mod+Shift+O')})`}
+        >
+          <FolderOpenIcon size={16} />
         </button>
         <button
           type="button"

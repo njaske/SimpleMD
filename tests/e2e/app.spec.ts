@@ -248,3 +248,90 @@ test('split view: the editor follows the reader smoothly, without stepping back'
   expect(still / moving.length).toBeLessThan(0.15)
   expect(biggest).toBeLessThan(60)
 })
+
+/** Wheel the pane `lead` with a mouse (one notch at a time) and record, every frame, how far
+ *  each pane moved. Returns the frames where the leader moved but the other pane stood still. */
+async function wheelStalls(lead: '.smd-reader' | '.cm-scroller'): Promise<{ moved: number; stalled: number }> {
+  const box = (await run.page.locator(lead).boundingBox())!
+  await run.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await run.page.evaluate(() => {
+    const w = window as unknown as { samples: number[][] }
+    w.samples = []
+    const reader = document.querySelector('.smd-reader') as HTMLElement
+    const editor = document.querySelector('.cm-scroller') as HTMLElement
+    const tick = (): void => {
+      w.samples.push([reader.scrollTop, editor.scrollTop])
+      if (w.samples.length < 120) requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })
+  for (let i = 0; i < 8; i++) {
+    await run.page.mouse.wheel(0, 100)
+    await run.page.waitForTimeout(90)
+  }
+  await run.page.waitForTimeout(1200)
+  const samples = await run.page.evaluate(() => (window as unknown as { samples: number[][] }).samples)
+  const [l, f] = lead === '.smd-reader' ? [0, 1] : [1, 0]
+  let moved = 0
+  let stalled = 0
+  for (let i = 1; i < samples.length; i++) {
+    if (Math.abs(samples[i][l] - samples[i - 1][l]) <= 2) continue
+    moved++
+    if (Math.abs(samples[i][f] - samples[i - 1][f]) < 0.5) stalled++
+  }
+  return { moved, stalled }
+}
+
+test('split view: both panes move in the same frame under the mouse wheel, either way round', async () => {
+  const body = Array.from({ length: 240 }, (_, i) =>
+    i % 8 === 0 ? `## Section ${i / 8 + 1}` : `Paragraph ${i}: both panes should stay on the same text while either one is wheeled.`
+  ).join('\n\n')
+  run = await launch({ notes: await makeNotes({ 'Long.md': `# Long\n\n${body}\n` }) })
+  await openFile('Long.md')
+  await run.page.keyboard.press('Control+2')
+  await expect(run.page.locator('.cm-content')).toBeVisible()
+  await run.page.waitForTimeout(600)
+
+  // A notch glides over many frames, and the other pane moves on every one of them
+  // (a frame late is the trailing people see).
+  const fromReader = await wheelStalls('.smd-reader')
+  expect(fromReader.moved).toBeGreaterThan(20)
+  expect(fromReader.stalled).toBe(0)
+
+  const fromEditor = await wheelStalls('.cm-scroller')
+  expect(fromEditor.moved).toBeGreaterThan(20)
+  expect(fromEditor.stalled).toBe(0)
+})
+
+test('split view shows the reader on the left and the editor on the right, like the switch', async () => {
+  run = await launch({ notes: await makeNotes(NOTES) })
+  await openFile('Answer.md')
+  await run.page.keyboard.press('Control+2')
+  await expect(run.page.locator('.cm-content')).toBeVisible()
+
+  const reader = (await run.page.locator('.smd-reader-pane').boundingBox())!
+  const editor = (await run.page.locator('.smd-editor-pane').boundingBox())!
+  expect(reader.x).toBeLessThan(editor.x)
+  const switchX = async (name: string) => (await run.page.getByRole('radio', { name, exact: true }).boundingBox())!.x
+  expect(await switchX('Read')).toBeLessThan(await switchX('Edit'))
+})
+
+test('the sidebar opens a file and a folder with buttons', async () => {
+  run = await launch({ notes: await makeNotes(NOTES) })
+  const elsewhere = await makeNotes({ 'Elsewhere.md': '# Far away note\n\nOpened with a button.\n' })
+  try {
+    await run.app.evaluate(({ dialog }, file) => {
+      dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [file] })) as typeof dialog.showOpenDialog
+    }, join(elsewhere, 'Elsewhere.md'))
+    await run.page.getByRole('button', { name: 'Open file', exact: true }).click()
+    await expect(article(run.page).getByRole('heading', { name: 'Far away note' })).toBeVisible()
+
+    await run.app.evaluate(({ dialog }, folder) => {
+      dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [folder] })) as typeof dialog.showOpenDialog
+    }, elsewhere)
+    await run.page.getByRole('button', { name: 'Open folder', exact: true }).click()
+    await expect(run.page.getByRole('treeitem', { name: 'Elsewhere.md', exact: true })).toBeVisible()
+  } finally {
+    await removeDir(elsewhere)
+  }
+})

@@ -419,6 +419,8 @@ export default class App extends Component<Record<string, never>, AppState> {
   }
   private closeTab = (id: string): void => this.docs.requestClose([id])
   private newDoc = (): void => void this.docs.newDocument()
+  private openFileDialog = (): void => void this.files.openFilesDialog()
+  private openFolderDialog = (): void => void this.files.openFolderDialog()
   private quickOpen = (): void => this.view.openPalette('')
   private openSettings = (): void => this.view.openSettings('appearance')
   private openShortcuts = (): void => this.view.openSettings('shortcuts')
@@ -508,6 +510,8 @@ export default class App extends Component<Record<string, never>, AppState> {
         hint={this.hint}
         onActivity={this.view.setActivity}
         onNewDocument={this.newDoc}
+        onOpenFile={this.openFileDialog}
+        onOpenFolder={this.openFolderDialog}
         onQuickOpen={this.quickOpen}
         onSettings={this.openSettings}
         onToggleTheme={this.view.toggleTheme}
@@ -670,8 +674,8 @@ export default class App extends Component<Record<string, never>, AppState> {
               )}
               recentFolders={recentFolders}
               onNewDocument={this.newDoc}
-              onOpenFile={() => void this.files.openFilesDialog()}
-              onOpenFolder={() => void this.files.openFolderDialog()}
+              onOpenFile={this.openFileDialog}
+              onOpenFolder={this.openFolderDialog}
               onPasteFromAi={() => void this.docs.pasteFromAi()}
               onOpenRecentFile={(id) => void this.docs.openFile(id)}
               onOpenRecentFolder={(p) => void this.files.openRecentFolder(p)}
