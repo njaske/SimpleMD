@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.1
 
 - Split view scrolls both panes in the same frame. The pane you weren't scrolling used to trail a frame behind, most visibly when scrolling the preview. Mouse-wheel notches now glide on both sides together, and touchpads are followed exactly.
 - Split view shows the preview on the left and the source on the right, in the same order as the Read · Split · Edit switch.
