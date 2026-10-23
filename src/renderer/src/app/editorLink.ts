@@ -4,6 +4,7 @@
 import type { Platform } from '@shared/types'
 import type { EditorHandle } from '@/lib/editor/types'
 import { linkScroll, type ScrollSurface } from '@/lib/editor/syncScroll'
+import { driveWheel } from '@/lib/editor/smoothWheel'
 
 export class EditorLink {
   private handle: EditorHandle | null = null
@@ -71,7 +72,9 @@ export class EditorLink {
     this.unlink = null
     this.linked = target
     if (!target) return
-    this.unlink = linkScroll(target, this.reader)
+    this.unlink = linkScroll(target, this.reader, {
+      driveWheel: (el, afterMove, onTake) => driveWheel(el, afterMove, { onTake })
+    })
     // Start in step: the editor joins at the line the reader was showing.
     requestAnimationFrame(() => {
       const line = this.reader.getTopLine()

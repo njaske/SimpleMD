@@ -102,6 +102,7 @@ export function createEditorHandle(view: EditorView): EditorHandleController {
         listeners.delete(cb)
       }
     },
+    scrollElement: () => (view.dom.isConnected ? view.scrollDOM : null),
     openSearch() {
       if (!view.dom.isConnected) return
       // Opening focuses the panel's field; when it's already open, that refocuses it.

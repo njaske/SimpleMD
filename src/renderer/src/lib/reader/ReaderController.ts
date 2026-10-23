@@ -240,6 +240,11 @@ export class ReaderController {
     }
   }
 
+  /** The reader's scrolling element, for synced wheel scrolling in Split view. */
+  scrollElement(): HTMLElement | null {
+    return this.el
+  }
+
   // ---- following a file that grows -------------------------------------------------
 
   /** True when the reader is scrolled to (or within a screen of) the end. While the

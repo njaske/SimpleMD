@@ -34,6 +34,8 @@ export interface EditorHandle {
   scrollToLine(line: number): void
   /** Subscribe to user scrolling. Returns an unsubscribe function. */
   onScroll(cb: () => void): () => void
+  /** The editor's scrolling element (CodeMirror's scroller), for synced wheel scrolling. */
+  scrollElement(): HTMLElement | null
   /** Open the find and replace panel (prefilled from the selection) and focus its field. */
   openSearch(): void
 }

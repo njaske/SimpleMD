@@ -68,16 +68,16 @@ afterEach(() => {
 })
 
 describe('linkScroll', () => {
-  it('moves the other surface to the same source line on the next frame', () => {
+  it('moves the other surface to the same source line in the same frame', () => {
     const editor = fakeSurface()
     const reader = fakeSurface()
     linkScroll(editor, reader, { now })
 
     editor.userScroll(12.5)
-    assert.deepEqual(reader.calls, [])
-    runFrames()
 
+    // No waiting for the next frame: a frame late is exactly the trailing the user sees.
     assert.deepEqual(reader.calls, [12.5])
+    assert.equal(frames.size, 0)
   })
 
   it('works in both directions', () => {
@@ -91,7 +91,7 @@ describe('linkScroll', () => {
     assert.deepEqual(editor.calls, [40])
   })
 
-  it('coalesces a burst of scroll events into one update per frame', () => {
+  it('follows every scroll as it happens', () => {
     const editor = fakeSurface()
     const reader = fakeSurface()
     linkScroll(editor, reader, { now })
@@ -99,10 +99,8 @@ describe('linkScroll', () => {
     editor.userScroll(1)
     editor.userScroll(2)
     editor.userScroll(3)
-    assert.equal(frames.size, 1)
-    runFrames()
 
-    assert.deepEqual(reader.calls, [3])
+    assert.deepEqual(reader.calls, [1, 2, 3])
   })
 
   it('ignores the echo of its own programmatic scroll', () => {
@@ -155,19 +153,67 @@ describe('linkScroll', () => {
     assert.deepEqual(reader.calls, [])
   })
 
-  it('unsubscribes and cancels a pending frame when stopped', () => {
+  it('unsubscribes when stopped', () => {
     const editor = fakeSurface()
     const reader = fakeSurface()
     const stop = linkScroll(editor, reader, { now })
-    editor.userScroll(8)
 
     stop()
     stop()
-    runFrames()
+    editor.userScroll(8)
 
     assert.equal(editor.listeners, 0)
     assert.equal(reader.listeners, 0)
     assert.deepEqual(reader.calls, [])
+  })
+
+  it('drives wheel scrolling of each surface and follows right after every move', () => {
+    const editor = fakeSurface()
+    const reader = fakeSurface()
+    const editorEl = {} as HTMLElement
+    const readerEl = {} as HTMLElement
+    editor.scrollElement = () => editorEl
+    reader.scrollElement = () => readerEl
+    const moves = new Map<HTMLElement, () => void>()
+    const takes = new Map<HTMLElement, () => void>()
+    const cancelled: HTMLElement[] = []
+    let stopped = 0
+    const stop = linkScroll(editor, reader, {
+      now,
+      driveWheel: (el, afterMove, onTake) => {
+        moves.set(el, afterMove)
+        takes.set(el, onTake)
+        return { stop: () => stopped++, cancel: () => cancelled.push(el) }
+      }
+    })
+    assert.deepEqual([...moves.keys()], [editorEl, readerEl])
+
+    // The driver moved the reader to line 20: the editor follows in that same call.
+    reader.top = 20
+    moves.get(readerEl)!()
+    assert.deepEqual(editor.calls, [20])
+
+    // Wheeling the editor stops the reader's glide, so the two never fight.
+    takes.get(editorEl)!()
+    assert.deepEqual(cancelled, [readerEl])
+
+    stop()
+    assert.equal(stopped, 2)
+  })
+
+  it('leaves wheel scrolling alone for surfaces without an element', () => {
+    const editor = fakeSurface()
+    const reader = fakeSurface()
+    let driven = 0
+    linkScroll(editor, reader, {
+      now,
+      driveWheel: () => {
+        driven++
+        return { stop: () => {}, cancel: () => {} }
+      }
+    })
+
+    assert.equal(driven, 0)
   })
 
   it('uses the real clock by default', () => {

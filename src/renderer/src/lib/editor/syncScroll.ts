@@ -8,11 +8,23 @@ export interface ScrollSurface {
   getTopLine(): number | null
   scrollToLine(line: number): void
   onScroll(cb: () => void): () => void
+  /** The element that scrolls. When given, wheel input over it is driven by the page so
+   *  the other surface can move in the very same frame (see smoothWheel). */
+  scrollElement?(): HTMLElement | null
 }
 
 export interface LinkScrollOptions {
   /** Clock for echo detection (tests pass a fake one). */
   now?: () => number
+  /** Takes over wheel scrolling of a surface's element, calls `afterMove` right after each
+   *  move and `onTake` for each wheel it takes (the app passes smoothWheel's driveWheel). */
+  driveWheel?: (el: HTMLElement, afterMove: () => void, onTake: () => void) => WheelControl
+}
+
+/** What a wheel driver hands back: cancel its current glide, or stop it for good. */
+export interface WheelControl {
+  cancel(): void
+  stop(): void
 }
 
 /** Scroll events from a surface this soon after we moved it are its echo, not the user. */
@@ -20,22 +32,18 @@ const ECHO_WINDOW_MS = 150
 /** Closer than this (in lines) is already in step; skip the no-op scroll. */
 const IN_STEP = 0.01
 
-/** Link `a` and `b`: when the user scrolls one, the other follows to the same source line.
- *  Must not feed back (a programmatic scroll must not bounce back), should coalesce to one
- *  update per animation frame, and must stop cleanly when the returned function is called. */
+/** Link `a` and `b`: when the user scrolls one, the other follows to the same source line
+ *  at once, in the same frame (waiting a frame is exactly the trailing people notice). Must
+ *  not feed back (a programmatic scroll must not bounce back) and must stop cleanly when
+ *  the returned function is called. */
 export function linkScroll(a: ScrollSurface, b: ScrollSurface, options: LinkScrollOptions = {}): () => void {
   const now = options.now ?? (() => performance.now())
   // When each surface was last moved by us; its scroll events until then are echoes.
   let drivenUntil: ReadonlyMap<ScrollSurface, number> = new Map()
-  let leader: ScrollSurface | null = null
-  let frame: number | null = null
   let stopped = false
 
-  const follow = (): void => {
-    frame = null
-    const from = leader
-    leader = null
-    if (stopped || !from) return
+  const follow = (from: ScrollSurface): void => {
+    if (stopped) return
     const to = from === a ? b : a
     const line = from.getTopLine()
     if (line === null || !Number.isFinite(line)) return
@@ -48,19 +56,26 @@ export function linkScroll(a: ScrollSurface, b: ScrollSurface, options: LinkScro
   const listen = (surface: ScrollSurface) => (): void => {
     if (stopped) return
     if (now() < (drivenUntil.get(surface) ?? -Infinity)) return
-    leader = surface
-    if (frame === null) frame = requestAnimationFrame(follow)
+    follow(surface)
   }
 
-  const offA = a.onScroll(listen(a))
-  const offB = b.onScroll(listen(b))
+  // Wheel input over either surface: moved by the page, and the other follows straight after.
+  // A wheel on one surface stops a glide still running on the other, so they never fight.
+  const drivers = new Map<ScrollSurface, WheelControl>()
+  const wheel = (surface: ScrollSurface): (() => void) => {
+    const el = surface.scrollElement?.()
+    if (!el || !options.driveWheel) return () => {}
+    const other = surface === a ? b : a
+    const driver = options.driveWheel(el, () => follow(surface), () => drivers.get(other)?.cancel())
+    drivers.set(surface, driver)
+    return () => driver.stop()
+  }
+
+  const offs = [a.onScroll(listen(a)), b.onScroll(listen(b)), wheel(a), wheel(b)]
 
   return () => {
     if (stopped) return
     stopped = true
-    offA()
-    offB()
-    if (frame !== null) cancelAnimationFrame(frame)
-    frame = null
+    offs.forEach((off) => off())
   }
 }
