@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Split view scrolls both panes in the same frame. The pane you weren't scrolling used to trail a frame behind, most visibly when scrolling the preview. Mouse-wheel notches now glide on both sides together, and touchpads are followed exactly.
+- Split view shows the preview on the left and the source on the right, in the same order as the Read · Split · Edit switch.
+- Open file and Open folder buttons in the sidebar, next to New document, so opening something no longer needs a shortcut.
+
 ## 1.1.0
 
 A redesign and a big step up in everyday features. Reading is still the heart of it.

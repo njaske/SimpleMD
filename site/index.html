@@ -1554,7 +1554,7 @@
       display: flex;
       height: 100%;
       background: var(--code-bg);
-      border-right: 1px solid var(--border-hairline);
+      border-left: 1px solid var(--border-hairline);
       overflow: hidden;
       width: 50%;
       opacity: 1;
@@ -1602,7 +1602,9 @@
       outline-offset: -2px;
     }
 
+    /* Preview first, editor second: the same order as the app's Split view. */
     .demo-preview-pane {
+      order: -1;
       height: 100%;
       overflow-y: auto;
       padding: 32px 40px;
@@ -1640,7 +1642,7 @@
       width: 50%;
       opacity: 1;
       pointer-events: auto;
-      border-right: 1px solid var(--border-hairline);
+      border-left: 1px solid var(--border-hairline);
     }
     .demo-work-area.mode-split .demo-preview-pane {
       width: 50%;
@@ -2951,8 +2953,8 @@
       .demo-work-area.mode-split .demo-editor-pane {
         width: 100% !important;
         height: 260px;
-        border-right: none;
-        border-bottom: 1px solid var(--border-hairline);
+        border-left: none;
+        border-top: 1px solid var(--border-hairline);
       }
       .demo-work-area.mode-split .demo-preview-pane {
         width: 100% !important;
@@ -3618,7 +3620,7 @@ graph LR
           <!-- Work Area with role="tabpanel" and height locked to 520px -->
           <div class="demo-work-area mode-split" id="demo-work-area" role="tabpanel" aria-labelledby="btn-mode-split">
             
-            <!-- Left Pane: Code Editor + Line Numbers -->
+            <!-- Code Editor + Line Numbers (shown right of the preview) -->
             <div class="demo-editor-pane" id="demo-editor-pane">
               <div class="line-numbers-gutter" id="line-numbers-gutter" aria-hidden="true">1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>10<br>11<br>12<br>13<br>14<br>15<br>16</div>
               <textarea 
@@ -3629,7 +3631,7 @@ graph LR
                 placeholder="Type Markdown with $math$ and ```mermaid diagrams..."></textarea>
             </div>
 
-            <!-- Right Pane: Live Rendered Output -->
+            <!-- Live Rendered Output (shown first, on the left) -->
             <div class="demo-preview-pane" id="demo-preview-pane">
               <div class="demo-preview-content" id="demo-preview-content">
                 <!-- Injected via Vanilla JS Engine -->
@@ -3694,7 +3696,7 @@ graph LR
             <li>
               <button type="button" class="tour-step" role="tab" id="tour-tab-split" aria-controls="tour-stage" aria-selected="false" tabindex="-1" data-shot="split">
                 <span class="tour-step-title">Split view</span>
-                <span class="tour-step-body"><span>Fix what the AI got wrong on the left and watch the preview follow as you type. Ctrl+S saves.</span></span>
+                <span class="tour-step-body"><span>Fix what the AI got wrong on the right and watch the preview beside it follow as you type. Ctrl+S saves.</span></span>
                 <span class="tour-step-track" aria-hidden="true"><span class="tour-step-fill"></span></span>
               </button>
             </li>
@@ -3722,7 +3724,7 @@ graph LR
               <img class="tour-shot" data-shot="diagrams" data-src="screenshots/diagrams-dark.png" width="2880" height="1800" decoding="async"
                    alt="A comparison table with inline math above a rendered Mermaid flowchart and a task list.">
               <img class="tour-shot" data-shot="split" data-src="screenshots/split-dark.png" width="2880" height="1800" decoding="async"
-                   alt="Split view: Markdown source in the editor on the left, the rendered preview on the right.">
+                   alt="Split view: the rendered preview on the left, the Markdown source in the editor on the right.">
               <img class="tour-shot" data-shot="search" data-src="screenshots/search-dark.png" width="2880" height="1800" decoding="async"
                    alt="Workspace search for the word token, listing every match by file and line.">
               <img class="tour-shot" data-shot="reading" data-src="screenshots/reading-dark.png" width="2880" height="1800" decoding="async"
