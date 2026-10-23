@@ -8,6 +8,8 @@ import type { QuickOpenItem } from '@/state/viewmodel'
 import type { PaletteCommand, PaletteFolder } from '@/components/CommandPalette'
 import type { SettingsValues } from '@/components/SettingsDialog'
 import Toast, { ToastAnnouncer } from '@/components/Toast'
+import UpdateNotice from '@/components/UpdateNotice'
+import type { UpdateActions } from './updates'
 import DropOverlay from '@/components/DropOverlay'
 import LazyBoundary from './LazyBoundary'
 import {
@@ -44,6 +46,7 @@ interface Props {
   onRestore: () => void
   onDiscard: () => void
   onCloseWindow: (save: boolean) => void
+  updates: UpdateActions
 }
 
 function settingsValues(s: AppState): SettingsValues {
@@ -197,6 +200,14 @@ export default function AppOverlays(p: Props) {
             onSection={(settings) => host.update({ settings })}
             onChange={(patch) => host.update(clean(patch))}
             onOpenLink={(url) => void window.api.openExternal(url).catch(() => host.toast("Couldn't open that link."))}
+            updates={{
+              auto: s.updateChecks === 'on',
+              info: s.updateInfo,
+              checking: s.updateChecking,
+              onAuto: p.updates.setAuto,
+              onCheck: () => void p.updates.checkNow(),
+              onDownload: p.updates.download
+            }}
             onClose={() => host.update({ settings: null })}
           />
         </Lazy>
@@ -210,6 +221,16 @@ export default function AppOverlays(p: Props) {
         <Lazy>
           <RecoveryPrompt entries={s.recovery} onRestore={p.onRestore} onDiscard={p.onDiscard} />
         </Lazy>
+      )}
+      {s.updateNotice && !s.dialog && (
+        <UpdateNotice
+          kind={s.updateNotice}
+          info={s.updateInfo}
+          onEnable={p.updates.enable}
+          onDecline={p.updates.decline}
+          onDownload={p.updates.download}
+          onLater={p.updates.later}
+        />
       )}
       <ToastAnnouncer toast={s.toast} />
       {s.toast && (

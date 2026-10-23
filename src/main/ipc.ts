@@ -1,4 +1,4 @@
-import { BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron'
+import { BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, shell } from 'electron'
 import { dirname } from 'path'
 import { isApproved, isApprovedFile, isApprovedRoot } from './access'
 import { isMarkdownFile, readImageDataUrl, readMdFile, readMdFiles, resolveDrop, saveMdFile, scanFolder } from './fs-md'
@@ -9,7 +9,10 @@ import { extractLaunchPaths } from './launch'
 import { clampZoom, windowBackground } from './platform'
 import { pickRendererSettings } from './settings-schema'
 import { watchFolder } from './watcher'
-import type { DropResult } from '../shared/types'
+import { checkForUpdate } from './updates'
+// The version as built (app.getVersion() reports Electron's own when run unpackaged).
+import { version as APP_VERSION } from '../../package.json'
+import type { DropResult, UpdateResult } from '../shared/types'
 
 export { restoreAccess } from './grants'
 
@@ -85,6 +88,9 @@ const MAX_CLIPBOARD_CHARS = 5 * 1024 * 1024
 function senderWindow(event: Electron.IpcMainInvokeEvent): BrowserWindow | null {
   return BrowserWindow.fromWebContents(event.sender)
 }
+
+/** The shortest gap between two update checks that really reach GitHub. */
+const UPDATE_CHECK_MIN_GAP_MS = 60_000
 
 export function registerIpc(): void {
   ipcMain.handle('dialog:openFolder', async (event) => {
@@ -173,6 +179,23 @@ export function registerIpc(): void {
       for (const win of BrowserWindow.getAllWindows()) win.setBackgroundColor(color)
     }
     return saved
+  })
+
+  // One request a minute at most, whatever the page asks: a repeat within that answers
+  // from the last result, so even a compromised page can't make SimpleMD hammer GitHub.
+  let lastCheck: { at: number; result: Promise<UpdateResult> } | null = null
+  ipcMain.handle('updates:check', () => {
+    const now = Date.now()
+    if (!lastCheck || now - lastCheck.at > UPDATE_CHECK_MIN_GAP_MS) {
+      const result = checkForUpdate(APP_VERSION, (url, init) => net.fetch(url, init))
+      const entry = { at: now, result }
+      lastCheck = entry
+      // Only answers are reused: after a failure, the next click (back online) tries again.
+      void result.then((r) => {
+        if (!r.ok && lastCheck === entry) lastCheck = null
+      })
+    }
+    return lastCheck.result
   })
 
   ipcMain.handle('shell:openExternal', async (_event, url: string) => {

@@ -62,6 +62,7 @@ export type CommandId =
   | 'copyRichText'
   | 'print'
   | 'settings'
+  | 'checkForUpdates'
   | 'shortcuts'
 
 /** Who gets a shortcut while the Markdown editor has focus (spec 3.1 conflict rule). */
@@ -185,6 +186,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { id: 'print', label: 'Print…', group: 'Export' },
 
   { id: 'settings', label: 'Settings', group: 'Help', shortcuts: ['Mod+,'], keywords: 'preferences options' },
+  { id: 'checkForUpdates', label: 'Check for updates…', group: 'Help', keywords: 'new version upgrade release download' },
   {
     id: 'shortcuts',
     label: 'Keyboard shortcuts',

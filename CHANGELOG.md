@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Optional update checks. SimpleMD asks once whether to check for new versions; nothing goes online unless you say yes. When on, it asks GitHub for the latest version number about once a day. A new version shows a notice in the corner and a dot on the Settings gear, and Download opens the release page (nothing installs on its own). "Check for updates" is also in the command palette and Settings → About.
+
 ## 1.1.1
 
 - Split view scrolls both panes in the same frame. The pane you weren't scrolling used to trail a frame behind, most visibly when scrolling the preview. Mouse-wheel notches now glide on both sides together, and touchpads are followed exactly.

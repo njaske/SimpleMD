@@ -649,6 +649,17 @@ button.smd-chip:hover { color: var(--fg); border-color: var(--border-strong); }
 .smd-about-version { font-size: 12.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
 .smd-about-tag { margin: 4px 0 14px; font-size: 13.5px; color: var(--fg-muted); line-height: 1.5; }
 .smd-about-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.smd-about-update { align-self: stretch; margin: 10px 0 14px; padding: 12px 14px 2px; border: 1px solid var(--border); border-radius: 12px; }
+.smd-about-update-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 30px; }
+.smd-about-update-status { font-size: 13px; color: var(--fg-muted); }
+.smd-about-update-status.is-new { color: var(--fg); font-weight: 600; }
+.smd-about-update .smd-setting:last-child { border-bottom: 0; }
+/* The dot on the Settings gear while a newer version is out. */
+.smd-gear { position: relative; }
+.smd-gear-dot {
+  position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 0 2px var(--bg-sunken, var(--bg));
+}
 .smd-privacy {
   margin-top: 22px; display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: 12px;
   background: var(--bg-sunken); border: 1px solid var(--border); font-size: 13px; line-height: 1.5; color: var(--fg-muted);
@@ -680,6 +691,23 @@ button.smd-chip:hover { color: var(--fg); border-color: var(--border-strong); }
 }
 .smd-toast-close:hover { color: var(--bg); background: color-mix(in srgb, var(--bg) 14%, transparent); }
 .smd-toast-close:focus-visible { outline-color: var(--bg); }
+
+/* Update notice: a card in the bottom-right corner, under toasts and dialogs. */
+.smd-update {
+  position: fixed; right: 16px; bottom: 40px; z-index: 105; width: 340px; max-width: calc(100vw - 32px);
+  display: flex; gap: 12px; padding: 14px 12px 14px 14px; border-radius: 12px;
+  border: 1px solid var(--border); background: var(--bg-elev); color: var(--fg); box-shadow: var(--shadow-2);
+  animation: smdRise var(--dur-med) var(--ease-out);
+}
+.smd-update-icon {
+  flex: none; width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+  background: color-mix(in oklch, var(--accent) 12%, transparent); color: var(--accent);
+}
+.smd-update-body { flex: 1; min-width: 0; }
+.smd-update-title { margin: 1px 0 4px; font-size: 13.5px; font-weight: 650; letter-spacing: -.01em; line-height: 1.35; }
+.smd-update-text { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--fg-muted); }
+.smd-update-actions { display: flex; gap: 6px; margin-top: 12px; }
+.smd-update-close { flex: none; width: 26px; height: 26px; margin: -4px -2px 0 0; }
 
 .smd-drop {
   position: fixed; inset: 0; z-index: 120; pointer-events: none; display: flex; align-items: center; justify-content: center;

@@ -25,6 +25,9 @@ export function initialState(env: Pick<AppState, 'systemDark' | 'narrow' | 'comp
     activeId: null,
     looseFiles: [],
     recentFolders: [],
+    updateChecks: 'ask',
+    lastUpdateCheck: 0,
+    skippedUpdate: '',
     contents: {},
     saved: {},
     tree: [],
@@ -58,6 +61,9 @@ export function initialState(env: Pick<AppState, 'systemDark' | 'narrow' | 'comp
     find: null,
     renderFixes: [],
     blockedImages: 0,
-    changes: {}
+    changes: {},
+    updateInfo: null,
+    updateChecking: false,
+    updateNotice: null
   }
 }

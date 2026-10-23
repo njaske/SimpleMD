@@ -40,7 +40,11 @@ const RENDERER_SETTABLE: Partial<Record<keyof Settings, Check>> = {
   recents: isPathList,
   openTabs: isPathList,
   activeId: (v) => v === null || (typeof v === 'string' && v.length < 4096),
-  looseFiles: isPathList
+  looseFiles: isPathList,
+  updateChecks: oneOf(['ask', 'on', 'off']),
+  // Up to the year 2100, in ms.
+  lastUpdateCheck: inRange(0, 4_102_444_800_000),
+  skippedUpdate: (v) => v === '' || (typeof v === 'string' && /^\d{1,6}\.\d{1,6}\.\d{1,6}$/.test(v))
 }
 
 /** Keep only renderer-settable keys whose values have the expected shape. */

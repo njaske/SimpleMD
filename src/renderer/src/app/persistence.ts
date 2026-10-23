@@ -30,7 +30,10 @@ export function settingsSnapshot(s: AppState): Partial<Settings> {
     openTabs: tabs,
     // Untitled documents live in crash recovery, never in settings.
     activeId: s.activeId && !isUntitled(s.activeId) ? s.activeId : (tabs[0] ?? null),
-    looseFiles: s.looseFiles.map((f) => f.path)
+    looseFiles: s.looseFiles.map((f) => f.path),
+    updateChecks: s.updateChecks,
+    lastUpdateCheck: s.lastUpdateCheck,
+    skippedUpdate: s.skippedUpdate
   }
 }
 

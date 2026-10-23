@@ -40,6 +40,7 @@ import { SettingsWriter, settingsSnapshot } from '@/app/persistence'
 import { RecoveryKeeper } from '@/app/recovery'
 import { bootstrap, restoreRecovered } from '@/app/bootstrap'
 import { initialState } from '@/app/initialState'
+import { createUpdateActions } from '@/app/updates'
 /** Start warming the lazy chunks this long after startup, off the critical path. */
 const PREFETCH_DELAY_MS = 1500
 const NO_SEARCH: SearchResult = { groups: [], total: 0, fileCount: 0 }
@@ -94,6 +95,15 @@ export default class App extends Component<Record<string, never>, AppState> {
     onReload: this.bridge.beforeReload
   })
   private view = createViewActions(this.host)
+  private updates = createUpdateActions(this.host, {
+    check: () => window.api.checkForUpdates(),
+    openUrl: (url) => void window.api.openExternal(url).catch(() => this.host.toast("Couldn't open that link.")),
+    now: () => Date.now(),
+    later: (fn, ms) => {
+      const id = setTimeout(fn, ms)
+      return () => clearTimeout(id)
+    }
+  })
   private exports = createExportActions(this.host)
   private drop = createDropTarget(this.host, this.files)
   private menuDeps: MenuDeps = { host: this.host, docs: this.docs, files: this.files, exports: this.exports }
@@ -104,7 +114,8 @@ export default class App extends Component<Record<string, never>, AppState> {
     view: this.view,
     exports: this.exports,
     renameTarget: () => this.renameTarget(),
-    reading: createReadingCommands(this.host, this.bridge, this.editorLink)
+    reading: createReadingCommands(this.host, this.bridge, this.editorLink),
+    updates: this.updates
   })
   private writer = new SettingsWriter((s) => window.api.setSettings(s))
   private recovery = new RecoveryKeeper(this.host)
@@ -154,6 +165,7 @@ export default class App extends Component<Record<string, never>, AppState> {
   }
 
   componentWillUnmount(): void {
+    this.updates.stop()
     window.removeEventListener('keydown', this.onKey, true)
     window.removeEventListener('keydown', this.onEscape)
     window.removeEventListener('dragend', this.drop.reset)
@@ -296,6 +308,7 @@ export default class App extends Component<Record<string, never>, AppState> {
         this.renderDoc(true)
       }
     })
+    this.updates.start()
     // Warm the lazy chunks once the first document is up, so the first palette,
     // find bar or switch to Edit doesn't wait on a parse.
     setTimeout(() => {
@@ -422,7 +435,8 @@ export default class App extends Component<Record<string, never>, AppState> {
   private openFileDialog = (): void => void this.files.openFilesDialog()
   private openFolderDialog = (): void => void this.files.openFolderDialog()
   private quickOpen = (): void => this.view.openPalette('')
-  private openSettings = (): void => this.view.openSettings('appearance')
+  private openSettings = (): void =>
+    this.view.openSettings(this.state.updateInfo?.available ? 'about' : 'appearance')
   private openShortcuts = (): void => this.view.openSettings('shortcuts')
   /** Outline click: the reader scrolls to the heading; Edit view (no reader)
    *  moves the editor to the heading's line instead. */
@@ -516,6 +530,7 @@ export default class App extends Component<Record<string, never>, AppState> {
         onSettings={this.openSettings}
         onToggleTheme={this.view.toggleTheme}
         onShortcuts={this.openShortcuts}
+        updateAvailable={!!s.updateInfo?.available}
         tree={treeProps}
         searchQuery={s.searchQuery}
         searchResult={searchResult}
@@ -700,6 +715,7 @@ export default class App extends Component<Record<string, never>, AppState> {
           onRestore={() => void restoreRecovered(this.host, this.recovery)}
           onDiscard={this.discardRecovered}
           onCloseWindow={(save) => void this.closeWindow(save)}
+          updates={this.updates}
         />
         {s.menu && (
           <LazyBoundary>

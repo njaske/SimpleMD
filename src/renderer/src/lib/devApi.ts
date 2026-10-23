@@ -101,7 +101,10 @@ export function installDevApi(): void {
     openTabs: first ? [first, welcome] : [],
     activeId: first,
     looseFiles: [],
-    recentFolders: [ROOT, '/Users/demo/Projects/agent-notes']
+    recentFolders: [ROOT, '/Users/demo/Projects/agent-notes'],
+    updateChecks: 'off',
+    lastUpdateCheck: 0,
+    skippedUpdate: ''
   }
   if (new URLSearchParams(location.search).has('empty')) {
     settings.lastFolder = null
@@ -243,6 +246,11 @@ export function installDevApi(): void {
     openExternal: async (url) => {
       window.open(url, '_blank', 'noopener')
     },
+    // The browser preview never goes online: it always reports this version as the latest.
+    checkForUpdates: async () => ({
+      ok: true,
+      info: { current: '0.0.0', latest: '0.0.0', available: false, url: 'https://github.com/njaske/SimpleMD/releases' }
+    }),
     trashItem: async (path) => {
       if (contents[path] !== undefined) {
         delete contents[path]

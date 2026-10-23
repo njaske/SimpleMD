@@ -94,7 +94,26 @@ export interface Settings {
   approvedFiles?: string[]
   /** Folders the user opened, most recent first. Written by the main process only. */
   recentFolders?: string[]
+  /** Whether SimpleMD may ask GitHub once a day for the latest version number. */
+  updateChecks: UpdateChecks
+  /** When the last successful update check finished (ms since 1970), 0 if never. */
+  lastUpdateCheck: number
+  /** A version the user said Later to: no notice for it, only the dot on Settings. */
+  skippedUpdate: string
 }
+
+/** `ask`: not decided yet (SimpleMD asks once). Checks are never automatic unless `on`. */
+export type UpdateChecks = 'ask' | 'on' | 'off'
+
+/** What an update check found. `url` is the release page on GitHub. */
+export interface UpdateInfo {
+  current: string
+  latest: string
+  available: boolean
+  url: string
+}
+
+export type UpdateResult = { ok: true; info: UpdateInfo } | { ok: false; error: 'offline' | 'unavailable' }
 
 /** The bridge exposed on `window.api` by the preload script. */
 export interface Api {
@@ -149,6 +168,8 @@ export interface Api {
   getSettings: () => Promise<Settings>
   setSettings: (partial: Partial<Settings>) => Promise<Settings>
   openExternal: (url: string) => Promise<void>
+  /** Ask GitHub for the latest release (only when the user turned that on, or asked). */
+  checkForUpdates: () => Promise<UpdateResult>
   /** Move a file or folder to the OS trash / Recycle Bin (recoverable). */
   trashItem: (path: string) => Promise<boolean>
   /** Show a file or folder in the OS file manager. */

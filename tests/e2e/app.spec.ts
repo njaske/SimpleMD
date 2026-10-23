@@ -335,3 +335,61 @@ test('the sidebar opens a file and a folder with buttons', async () => {
     await removeDir(elsewhere)
   }
 })
+
+test('update checks: asks once, then shows a newer version with a dot on Settings', async () => {
+  run = await launch({ notes: await makeNotes(NOTES), updateChecks: 'ask' })
+  // Stand in for GitHub and for the browser: record what would be fetched and opened.
+  await run.app.evaluate(({ net, shell }) => {
+    const g = globalThis as unknown as { fetched: string[]; opened: string[] }
+    g.fetched = []
+    g.opened = []
+    // The app serves its own files through net.fetch too: only GitHub gets the stand-in.
+    const real = net.fetch.bind(net)
+    net.fetch = (async (input: string | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.url
+      if (!url.startsWith('https://api.github.com/')) return real(input, init)
+      g.fetched.push(url)
+      return new Response(JSON.stringify({ tag_name: 'v9.9.9', draft: false, prerelease: false }), { status: 200 })
+    }) as typeof net.fetch
+    shell.openExternal = (async (url: string) => void g.opened.push(url)) as typeof shell.openExternal
+  })
+  const fetched = () => run.app.evaluate(() => (globalThis as unknown as { fetched: string[] }).fetched)
+
+  // The one-time question comes on its own, and nothing has gone online yet.
+  const notice = run.page.locator('.smd-update')
+  await expect(notice).toContainText('Get told about new versions?', { timeout: 15_000 })
+  expect(await fetched()).toEqual([])
+
+  await notice.getByRole('button', { name: 'Turn on' }).click()
+  await expect(notice).toContainText('SimpleMD 9.9.9 is available')
+  expect(await fetched()).toEqual(['https://api.github.com/repos/njaske/SimpleMD/releases/latest'])
+  const gear = run.page.getByRole('button', { name: 'Settings, a new version is available' })
+  await expect(gear).toBeVisible()
+
+  // Later hides the notice; the dot stays, and the gear opens About with a Download button.
+  await notice.getByRole('button', { name: 'Later' }).click()
+  await expect(notice).toHaveCount(0)
+  await gear.click()
+  await run.page.getByRole('button', { name: /Download 9\.9\.9/ }).click()
+  const opened = await run.app.evaluate(() => (globalThis as unknown as { opened: string[] }).opened)
+  expect(opened).toEqual(['https://github.com/njaske/SimpleMD/releases/tag/v9.9.9'])
+})
+
+test('update checks: never goes online while turned off', async () => {
+  run = await launch({ notes: await makeNotes(NOTES), updateChecks: 'off' })
+  await run.app.evaluate(({ net }) => {
+    const g = globalThis as unknown as { fetched: number }
+    g.fetched = 0
+    const real = net.fetch.bind(net)
+    net.fetch = (async (input: string | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.url
+      if (url.startsWith('file:')) return real(input, init)
+      g.fetched++
+      return new Response('{}', { status: 200 })
+    }) as typeof net.fetch
+  })
+  await run.page.waitForTimeout(8_000)
+
+  await expect(run.page.locator('.smd-update')).toHaveCount(0)
+  expect(await run.app.evaluate(() => (globalThis as unknown as { fetched: number }).fetched)).toBe(0)
+})

@@ -83,7 +83,8 @@ SimpleMD renders all of it the way it was meant to look, in a fast desktop app t
 | **Navigation** | Command palette, Quick Open, find in document, search across files, outline that follows your reading, pinned and recent files, tabs |
 | **Export** | PDF, a single self-contained HTML file, print, or copy as rich text to paste into Docs, Word or email |
 | **Windows integration** | Shows up in Explorer's "Open with" for `.md`, `.markdown`, `.mdx` and friends; double-click to open |
-| **Privacy** | No account, no telemetry, no update checks. The app never phones home; the only thing it ever fetches is an image a document itself links to on the web, and you can block those too |
+| **Privacy** | No account, no telemetry. The only things SimpleMD ever fetches are images a document itself links to on the web (you can block those too) and, only if you turn it on, the latest version number from GitHub |
+| **Updates** | Optional and off until you say yes: SimpleMD asks once whether to check for new versions. If you turn it on, it asks GitHub for the latest version number about once a day and shows a notice and a dot on Settings when there's a new one. No account, cookie or ID goes with it (GitHub sees your IP address, as with any website), nothing about your files is sent, and nothing downloads or installs on its own. Check any time from the command palette or Settings → About |
 
 ### Keyboard shortcuts
 

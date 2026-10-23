@@ -38,6 +38,8 @@ export interface CommandDeps {
   /** F2: the focused tree row, else the active document. */
   renameTarget: () => { path: string; isFolder: boolean } | null
   reading: ReadingCommands
+  /** Update checks (the App passes its update actions). */
+  updates?: { checkNow(): Promise<void> }
 }
 
 export function buildCommandTable(deps: CommandDeps): CommandTable {
@@ -137,6 +139,7 @@ export function buildCommandTable(deps: CommandDeps): CommandTable {
     copyRichText: { run: exports.copyRichText, enabled: hasDoc },
     print: { run: exports.print, enabled: hasDoc },
     settings: { run: () => view.openSettings('appearance') },
+    checkForUpdates: { run: () => void deps.updates?.checkNow() },
     shortcuts: { run: () => view.openSettings('shortcuts') }
   }
 }

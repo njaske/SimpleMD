@@ -28,8 +28,15 @@ export async function makeNotes(files: Record<string, string>): Promise<string> 
   return dir
 }
 
-export async function launch(opts: { notes?: string | null; userData?: string } = {}): Promise<Launched> {
+export async function launch(
+  opts: { notes?: string | null; userData?: string; updateChecks?: 'ask' | 'on' | 'off' } = {}
+): Promise<Launched> {
   const userData = opts.userData ?? (await mkdtemp(join(tmpdir(), 'simplemd-e2e-data-')))
+  // A fresh profile starts with update checks off, so the one-time "get told about new
+  // versions?" notice only shows in the test about it (and nothing ever goes online).
+  if (!opts.userData) {
+    await writeFile(join(userData, 'simplemd-settings.json'), JSON.stringify({ updateChecks: opts.updateChecks ?? 'off' }))
+  }
   const env: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v
   delete env.ELECTRON_RENDERER_URL

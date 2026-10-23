@@ -25,7 +25,10 @@ const DEFAULTS: Settings = {
   recents: [],
   openTabs: [],
   activeId: null,
-  looseFiles: []
+  looseFiles: [],
+  updateChecks: 'ask',
+  lastUpdateCheck: 0,
+  skippedUpdate: ''
 }
 
 let cache: Settings | null = null

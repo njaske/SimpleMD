@@ -23,6 +23,8 @@ export interface SidebarProps {
   onSettings: () => void
   onToggleTheme: () => void
   onShortcuts: () => void
+  /** A newer version is out: a dot on the Settings gear. */
+  updateAvailable: boolean
   tree: FileTreeProps
   searchQuery: string
   searchResult: SearchResult
@@ -117,12 +119,13 @@ function Sidebar(p: SidebarProps) {
       <div className="smd-side-foot">
         <button
           type="button"
-          className="smd-iconbtn"
+          className="smd-iconbtn smd-gear"
           onClick={p.onSettings}
-          aria-label="Settings"
-          title={`Settings (${p.hint('Mod+,')})`}
+          aria-label={p.updateAvailable ? 'Settings, a new version is available' : 'Settings'}
+          title={p.updateAvailable ? 'A new version is available' : `Settings (${p.hint('Mod+,')})`}
         >
           <GearIcon size={16} />
+          {p.updateAvailable && <span className="smd-gear-dot" aria-hidden="true" />}
         </button>
         <button
           type="button"

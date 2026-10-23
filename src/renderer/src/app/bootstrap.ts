@@ -36,6 +36,9 @@ export function settingsPatch(s: Settings): Patch {
     pinned: s.pinned,
     recents: s.recents,
     recentFolders: s.recentFolders ?? [],
+    updateChecks: s.updateChecks ?? 'ask',
+    lastUpdateCheck: s.lastUpdateCheck ?? 0,
+    skippedUpdate: s.skippedUpdate ?? '',
     ready: true
   }
 }

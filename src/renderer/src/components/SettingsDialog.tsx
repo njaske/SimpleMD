@@ -1,5 +1,5 @@
 import type { KeyboardEvent, ReactNode } from 'react'
-import type { Platform, ReadingFont, ThemeName } from '@shared/types'
+import type { Platform, ReadingFont, ThemeName, UpdateInfo } from '@shared/types'
 import type { SettingsSection } from '@/app/types'
 import { ACCENTS, UI_SCALE } from '@/app/appearance'
 import { COMMANDS, EDITOR_SHORTCUTS, GROUP_ORDER, commandLabel, type CommandId } from '@/lib/commands'
@@ -46,7 +46,19 @@ export interface SettingsDialogProps {
   onSection: (s: SettingsSection) => void
   onChange: (patch: Partial<SettingsValues>) => void
   onOpenLink: (url: string) => void
+  updates: UpdateSettings
   onClose: () => void
+}
+
+/** The About page's update block. */
+export interface UpdateSettings {
+  /** Automatic checks are on. */
+  auto: boolean
+  info: UpdateInfo | null
+  checking: boolean
+  onAuto: (on: boolean) => void
+  onCheck: () => void
+  onDownload: () => void
 }
 
 const SECTIONS: { id: SettingsSection; label: string; icon: ReactNode }[] = [
@@ -263,12 +275,49 @@ function Shortcuts({ platform, hasCommand }: SettingsDialogProps) {
   )
 }
 
-function About({ onOpenLink }: SettingsDialogProps) {
+function UpdateBlock({ updates: u }: SettingsDialogProps) {
+  const found = u.info?.available ? u.info : null
+  const status = u.checking
+    ? 'Checking GitHub…'
+    : found
+      ? `Version ${found.latest} is available.`
+      : u.info
+        ? "You're on the latest version."
+        : 'Not checked yet.'
+  return (
+    <div className="smd-about-update">
+      <div className="smd-about-update-row">
+        <span className={'smd-about-update-status' + (found ? ' is-new' : '')} role="status">
+          {status}
+        </span>
+        {found ? (
+          <button type="button" className="smd-btn smd-btn--primary smd-btn--sm" onClick={u.onDownload}>
+            Download {found.latest} <ExternalIcon size={13} />
+          </button>
+        ) : (
+          <button type="button" className="smd-btn smd-btn--sm" onClick={u.onCheck} disabled={u.checking}>
+            Check for updates
+          </button>
+        )}
+      </div>
+      <Setting
+        label="Check for new versions automatically"
+        desc="About once a day, SimpleMD asks GitHub for the latest version number and tells you when there's a new one. No account, cookie or ID goes with it (GitHub sees your IP address, as with any website), and nothing is downloaded on its own."
+      >
+        <Switch label="Check for new versions automatically" checked={u.auto} onChange={u.onAuto} />
+      </Setting>
+    </div>
+  )
+}
+
+function About(p: SettingsDialogProps) {
+  const { onOpenLink } = p
   return (
     <div className="smd-about">
       <AppMark size={44} style={{ color: 'var(--fg)' }} />
       <h3 className="smd-about-name">SimpleMD</h3>
       <div className="smd-about-version">Version {version}</div>
+      <UpdateBlock {...p} />
       <p className="smd-about-tag">A calm, private reader for everything your AI writes.</p>
       <div className="smd-about-links">
         <button type="button" className="smd-btn smd-btn--sm" onClick={() => onOpenLink(LINKS.website)}>
@@ -284,8 +333,9 @@ function About({ onOpenLink }: SettingsDialogProps) {
       <div className="smd-privacy">
         <ShieldIcon size={18} />
         <div>
-          <strong>No network requests, ever.</strong> SimpleMD has no accounts, analytics or update pings. Your
-          documents stay on your computer.
+          <strong>Your documents stay on your computer.</strong> No accounts, no analytics, no tracking. SimpleMD
+          only goes online to load images a document links to (you can block those) and to ask GitHub for the
+          latest version number, when you check for updates or turn automatic checks on.
         </div>
       </div>
     </div>

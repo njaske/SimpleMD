@@ -1,5 +1,5 @@
 // The App shell's state shape, shared by the controller modules in this folder.
-import type { Activity, MdFileInfo, MdFolderInfo, ReadingFont, RecoveryEntry, ThemeName, ViewMode } from '@shared/types'
+import type { Activity, MdFileInfo, MdFolderInfo, ReadingFont, RecoveryEntry, ThemeName, UpdateChecks, UpdateInfo, ViewMode } from '@shared/types'
 import type { EditorJump } from '@/components/CodeEditor'
 import type { ContextMenuState } from '@/components/ContextMenu'
 import type { ToastState } from '@/components/Toast'
@@ -73,6 +73,9 @@ export interface AppState {
   looseFiles: MdFileInfo[]
   /** Written by the main process; read back after each folder open. */
   recentFolders: string[]
+  updateChecks: UpdateChecks
+  lastUpdateCheck: number
+  skippedUpdate: string
 
   // Documents
   contents: Record<string, string>
@@ -125,4 +128,9 @@ export interface AppState {
   /** "What changed" since a document reloaded from disk: blocks marked (or line
    *  ranges, until the reader has painted the document), by document id. */
   changes: Record<string, number>
+  /** The last update check's answer (drives the dot on Settings and the About page). */
+  updateInfo: UpdateInfo | null
+  updateChecking: boolean
+  /** The corner notice: asking once about update checks, or a new version is out. */
+  updateNotice: 'ask' | 'available' | null
 }

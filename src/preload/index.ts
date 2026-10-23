@@ -6,7 +6,8 @@ import type {
   OpenedFile,
   Platform,
   RecoveryEntry,
-  Settings
+  Settings,
+  UpdateResult
 } from '../shared/types'
 
 const platform: Platform =
@@ -58,6 +59,7 @@ const api: Api = {
   getSettings: () => ipcRenderer.invoke('settings:get') as Promise<Settings>,
   setSettings: (partial) => ipcRenderer.invoke('settings:set', partial) as Promise<Settings>,
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url) as Promise<void>,
+  checkForUpdates: () => ipcRenderer.invoke('updates:check') as Promise<UpdateResult>,
   trashItem: (path) => ipcRenderer.invoke('shell:trashItem', path) as Promise<boolean>,
   revealItem: (path) => ipcRenderer.invoke('shell:revealItem', path) as Promise<void>,
   setUnsaved: (hasUnsaved) => ipcRenderer.invoke('win:setUnsaved', hasUnsaved) as Promise<void>,

@@ -23,7 +23,7 @@ async function session(theme, work) {
   const kube = join(notes, 'AI Answers', 'Kubernetes Cheatsheet.md')
   await writeFile(join(userData, 'simplemd-settings.json'), JSON.stringify({
     theme, accent: '#c0392b', readingFont: 'Serif', readingWidth: 700, readingSize: 17, lineHeight: 1.7,
-    uiScale: 1, reduceMotion: true, syncScroll: true, blockRemoteImages: false, showStatusBar: true,
+    uiScale: 1, reduceMotion: true, syncScroll: true, blockRemoteImages: false, showStatusBar: true, updateChecks: 'off',
     sidebarOpen: true, outlineOpen: true, activity: 'files', viewMode: 'read', pinned: [], recents: [],
     openTabs: [kube, rate], activeId: rate, looseFiles: []
   }))
